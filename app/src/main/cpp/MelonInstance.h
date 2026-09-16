@@ -58,6 +58,7 @@ public:
     void setSlot2AnalogInput(float x, float y);
     int readAudioOutput(s16* buffer, int length);
     void setAudioOutputSkew(double skew);
+    int getAudioOutputFill();
     bool takeScreenshot();
     void loadCheats(std::list<Cheat> cheats);
     int sendNetPacket(u8* data, int length);

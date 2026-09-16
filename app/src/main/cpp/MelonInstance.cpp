@@ -2827,6 +2827,11 @@ int MelonInstance::readAudioOutput(s16* buffer, int length)
     return nds->SPU.ReadOutput(buffer, length);
 }
 
+int MelonInstance::getAudioOutputFill()
+{
+    return nds->SPU.GetOutputSize();
+}
+
 void MelonInstance::setAudioOutputSkew(double skew)
 {
     nds->SPU.SetOutputSkew(skew);

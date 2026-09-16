@@ -11,6 +11,7 @@ private:
     void (*onErrorCallback)(void);
     std::ostream* _recordingStream;
     float audioSampleFrac;
+    double fifoFillAverage;
 
 public:
     std::weak_ptr<MelonDSAndroid::MelonInstance> activeInstance;

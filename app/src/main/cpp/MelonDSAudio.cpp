@@ -31,14 +31,10 @@ namespace MelonDSAndroid
     int getAudioBufferSizeInFrames(int audioLatency)
     {
         switch (audioLatency) {
-            case 0:
-                return 512;
-            case 1:
-                return 1024;
             case 2:
-                return 2048;
+                return 4096;
             default:
-                return 1024;
+                return 2048;
         }
     }
 
@@ -272,13 +268,15 @@ namespace MelonDSAndroid
 
     void updateAudioSettings(AudioSettings audioSettings)
     {
-        if (audioSettings.soundEnabled && currentAudioSettings.volume > 0) {
+        if (audioSettings.soundEnabled && audioSettings.volume > 0) {
             if (!audioStream) {
                 setupAudioOutputStream(audioSettings.audioLatency, audioSettings.volume);
             } else if (currentAudioSettings.audioLatency != audioSettings.audioLatency || currentAudioSettings.volume != audioSettings.volume) {
                 // Recreate audio stream with new settings
                 cleanupAudioOutputStream();
                 setupAudioOutputStream(audioSettings.audioLatency, audioSettings.volume);
+                if (audioStream)
+                    audioStream->requestStart();
             }
         } else if (audioStream) {
             cleanupAudioOutputStream();

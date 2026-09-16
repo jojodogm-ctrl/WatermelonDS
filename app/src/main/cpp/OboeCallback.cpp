@@ -6,9 +6,12 @@
 using namespace melonDS;
 
 #define INTERNAL_FRAME_RATE 59.8260982880808f
+#define FIFO_TARGET_FILL 2048.0
+#define MAX_RATE_CORRECTION 0.005
 
 OboeCallback::OboeCallback(int volume, void (*onErrorCallback)(void), std::ostream* recordingStream) : _volume(volume), onErrorCallback(onErrorCallback), _recordingStream(recordingStream) {
     audioSampleFrac = 0;
+    fifoFillAverage = FIFO_TARGET_FILL;
 }
 
 oboe::DataCallbackResult
@@ -23,7 +26,11 @@ OboeCallback::onAudioReady(oboe::AudioStream *stream, void *audioData, int32_t n
 
     int len = numFrames;
 
-    double skew = std::clamp(60.0 / INTERNAL_FRAME_RATE, 0.995, 1.005);
+    // The emulator and the audio device run on different clocks. Adjust the resampling ratio to keep the FIFO half full
+    int fifoFill = currentInstance->getAudioOutputFill();
+    fifoFillAverage += (fifoFill - fifoFillAverage) * 0.05;
+    double correction = std::clamp((fifoFillAverage - FIFO_TARGET_FILL) / FIFO_TARGET_FILL * MAX_RATE_CORRECTION, -MAX_RATE_CORRECTION, MAX_RATE_CORRECTION);
+    double skew = (60.0 / INTERNAL_FRAME_RATE) * (1.0 + correction);
     currentInstance->setAudioOutputSkew(skew);
 
     int len_in = getNumSamplesOut(len);
