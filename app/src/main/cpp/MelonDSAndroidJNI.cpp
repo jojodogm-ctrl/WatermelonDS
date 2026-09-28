@@ -6,6 +6,7 @@
 #include <android/native_window_jni.h>
 #include <jni.h>
 #include <string>
+#include "NetplayAndroid.h"
 #include <sstream>
 #include <vector>
 #include <mutex>
@@ -1066,6 +1067,14 @@ Java_me_magnum_melonds_MelonEmulator_dumpAudioOutputPcmCapture(
             return nullptr;
         return javaResult;
     }
+}
+
+JNIEXPORT void JNICALL
+Java_me_magnum_melonds_MelonEmulator_requestNetplay(JNIEnv* env, jobject thiz, jstring request)
+{
+    const char* chars = env->GetStringUTFChars(request, nullptr);
+    NetplayAndroid::Request(chars ? chars : "");
+    if (chars) env->ReleaseStringUTFChars(request, chars);
 }
 
 JNIEXPORT void JNICALL

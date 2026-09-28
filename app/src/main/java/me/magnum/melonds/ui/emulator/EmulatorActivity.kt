@@ -182,6 +182,11 @@ class EmulatorActivity : AppCompatActivity() {
             }
         }
 
+        /** "host" or "guest", from the app that launched the game. */
+        const val KEY_NETPLAY_ROLE = "eu.emufii.netplay.role"
+        /** The host's address, for a guest. */
+        const val KEY_NETPLAY_ADDRESS = "eu.emufii.netplay.address"
+
         fun getFirmwareEmulatorActivityIntent(context: Context, consoleType: ConsoleType): Intent {
             return Intent(context, EmulatorActivity::class.java).apply {
                 putExtra(KEY_BOOT_FIRMWARE_ONLY, true)
@@ -507,6 +512,16 @@ class EmulatorActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handler = Handler(mainLooper)
+        // Netplay asked for by the launcher (Emufii): who hosts, and where.
+        // Only on a fresh launch: a recreated activity keeps its session.
+        if (savedInstanceState == null) {
+            when (intent?.getStringExtra(KEY_NETPLAY_ROLE)) {
+                "host" -> MelonEmulator.requestNetplay("host")
+                "guest" -> intent.getStringExtra(KEY_NETPLAY_ADDRESS)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { MelonEmulator.requestNetplay("join:$it") }
+            }
+        }
         externalDisplayMode = settingsRepository.getExternalDisplayMode()
         lifecycleOwnerProvider.setCurrentLifecycleOwner(this)
         binding = ActivityEmulatorBinding.inflate(layoutInflater)

@@ -105,6 +105,12 @@ object MelonEmulator {
 
     external fun setupCheats(cheats: Array<Cheat>)
 
+    /**
+     * Two-player netplay, asked for by the app that launched the game: "host", or
+     * "join:<address>". The session starts once the other player is there.
+     */
+    external fun requestNetplay(request: String)
+
     external fun setupAchievements(
         achievements: Array<RASimpleAchievement>,
         leaderboards: Array<RASimpleLeaderboard>,

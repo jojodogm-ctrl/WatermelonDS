@@ -415,40 +415,80 @@ void Teardown()
     host = nullptr;
 }
 
-bool Handshake(NDS* local, int localId, const ArgsFactory& mirrorArgs, const std::string& request)
+// Waiting for the other player never blocks the game: the connection is pumped
+// once per frame until it comes up, and only the exchange that follows, a few
+// seconds, holds the frame.
+bool connecting = false;
+bool connectAsHost = false;
+std::string joinAddress;
+u64 connectStart = 0, lastDial = 0;
+constexpr u64 kConnectTimeoutMs = 180000;
+constexpr u64 kRedialMs = 3000;
+
+void Dial()
+{
+    ENetAddress addr {};
+    enet_address_set_host(&addr, joinAddress.c_str());
+    addr.port = kPort;
+    if (peer) enet_peer_reset(peer);
+    peer = nullptr;
+    enet_host_connect(host, &addr, 1, 0);
+    lastDial = NowMs();
+}
+
+bool StartConnect(const std::string& request)
 {
     static bool enetReady = false;
     if (!enetReady) { enet_initialize(); enetReady = true; }
+    Teardown();
 
-    bool isHost = request == "host";
-    if (isHost)
+    connectAsHost = request == "host";
+    if (connectAsHost)
     {
         ENetAddress addr {ENET_HOST_ANY, kPort};
-        host = enet_host_create(&addr, 1, 1, 0, 0);
+        host = enet_host_create(&addr, 4, 1, 0, 0);
         if (!host) { NP_LOG("[netplay] could not listen on %u", kPort); return false; }
         NP_LOG("[netplay] hosting on port %u, waiting for the other player", kPort);
-        u64 start = NowMs();
-        while (!peer && NowMs() - start < 120000)
-        {
-            ENetEvent evt;
-            if (enet_host_service(host, &evt, 100) > 0 && evt.type == ENET_EVENT_TYPE_CONNECT)
-                peer = evt.peer;
-            if (Property("debug.wmds.netplay") != request) break;
-        }
     }
     else
     {
+        joinAddress = request.substr(5);
         host = enet_host_create(nullptr, 1, 1, 0, 0);
-        ENetAddress addr {};
-        enet_address_set_host(&addr, request.substr(5).c_str());
-        addr.port = kPort;
-        ENetPeer* p = enet_host_connect(host, &addr, 1, 0);
-        ENetEvent evt;
-        NP_LOG("[netplay] joining %s", request.substr(5).c_str());
-        if (p && enet_host_service(host, &evt, 10000) > 0 && evt.type == ENET_EVENT_TYPE_CONNECT)
-            peer = p;
+        if (!host) return false;
+        NP_LOG("[netplay] joining %s", joinAddress.c_str());
+        Dial();
     }
-    if (!peer) { NP_LOG("[netplay] no connection"); Teardown(); return false; }
+    connecting = true;
+    connectStart = NowMs();
+    return true;
+}
+
+// true once the other player is connected
+bool PumpConnect()
+{
+    ENetEvent evt;
+    while (enet_host_service(host, &evt, 0) > 0)
+    {
+        if (evt.type == ENET_EVENT_TYPE_CONNECT) { peer = evt.peer; return true; }
+        if (evt.type == ENET_EVENT_TYPE_RECEIVE) enet_packet_destroy(evt.packet);
+    }
+    u64 now = NowMs();
+    if (now - connectStart > kConnectTimeoutMs)
+    {
+        NP_LOG("[netplay] the other player never came");
+        connecting = false;
+        Teardown();
+        return false;
+    }
+    // the host may not be listening yet: dial again until it is
+    if (!connectAsHost && now - lastDial > kRedialMs)
+        Dial();
+    return false;
+}
+
+bool Exchange(NDS* local, int localId, const ArgsFactory& mirrorArgs)
+{
+    connecting = false;
     enet_peer_timeout(peer, 0, 10000, 30000);
 
     Hello hello {Msg_Hello, kMagic, RomHash(local), kLagFrames};
@@ -528,6 +568,15 @@ bool Handshake(NDS* local, int localId, const ArgsFactory& mirrorArgs, const std
 
 }
 
+std::mutex requestLock;
+std::string pendingRequest;
+
+void Request(const std::string& request)
+{
+    std::lock_guard<std::mutex> lk(requestLock);
+    pendingRequest = request;
+}
+
 bool Poll(NDS* local, int localId, const ArgsFactory& mirrorArgs)
 {
     if (active.load())
@@ -536,21 +585,38 @@ bool Poll(NDS* local, int localId, const ArgsFactory& mirrorArgs)
         return active.load();
     }
 
-    // checked once a second, the property read is cheap but not free
-    static u32 tick = 0;
-    if ((tick++ % 60) != 0) return false;
+    if (connecting)
+    {
+        if (PumpConnect())
+            return Exchange(local, localId, mirrorArgs);
+        return false;
+    }
 
-    std::string request = Property("debug.wmds.netplay");
-    // A request already set when the app starts is a leftover from a past
-    // session, not a new one: acting on it held the game on a black screen
-    // for up to two minutes, waiting for a player who was not coming.
-    static bool seenFirst = false;
-    if (!seenFirst) { seenFirst = true; lastRequest = request; return false; }
-    if (request.empty() || request == lastRequest) return false;
-    lastRequest = request;
+    std::string request;
+    {
+        std::lock_guard<std::mutex> lk(requestLock);
+        request.swap(pendingRequest);
+    }
+
+    if (request.empty())
+    {
+        // bench: the system property, checked once a second
+        static u32 tick = 0;
+        if ((tick++ % 60) != 0) return false;
+        std::string prop = Property("debug.wmds.netplay");
+        // A request already set when the app starts is a leftover from a past
+        // session, not a new one: acting on it held the game on a black screen
+        // for up to two minutes, waiting for a player who was not coming.
+        static bool seenFirst = false;
+        if (!seenFirst) { seenFirst = true; lastRequest = prop; return false; }
+        if (prop.empty() || prop == lastRequest) return false;
+        lastRequest = prop;
+        request = prop;
+    }
+
     if (request != "host" && request.rfind("join:", 0) != 0) return false;
-
-    return Handshake(local, localId, mirrorArgs, request);
+    StartConnect(request);
+    return false;
 }
 
 bool Active()

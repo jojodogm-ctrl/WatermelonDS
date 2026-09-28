@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 
 #include "NDS.h"
 #include "Args.h"
@@ -29,6 +30,10 @@ using ArgsFactory = std::function<std::unique_ptr<melonDS::NDSArgs>()>;
 bool Poll(melonDS::NDS* local, int localId, const ArgsFactory& mirrorArgs);
 
 bool Active();
+
+// A session asked for by the launching app: "host" or "join:<address>". Taken
+// up by the next Poll, whatever the system property says.
+void Request(const std::string& request);
 
 // Around the local console's frame: applies the input queued for this frame
 // (the live input goes out for a later one), then reports the emulated time.
