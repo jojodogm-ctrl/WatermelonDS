@@ -186,6 +186,8 @@ class EmulatorActivity : AppCompatActivity() {
         const val KEY_NETPLAY_ROLE = "eu.emufii.netplay.role"
         /** The host's address, for a guest. */
         const val KEY_NETPLAY_ADDRESS = "eu.emufii.netplay.address"
+        /** Optional, for the host: how many players, itself included (2 to 4). */
+        const val KEY_NETPLAY_PLAYERS = "eu.emufii.netplay.players"
 
         fun getFirmwareEmulatorActivityIntent(context: Context, consoleType: ConsoleType): Intent {
             return Intent(context, EmulatorActivity::class.java).apply {
@@ -516,7 +518,12 @@ class EmulatorActivity : AppCompatActivity() {
         // Only on a fresh launch: a recreated activity keeps its session.
         if (savedInstanceState == null) {
             when (intent?.getStringExtra(KEY_NETPLAY_ROLE)) {
-                "host" -> MelonEmulator.requestNetplay("host")
+                // with the number of players when the launcher knows it, so the
+                // host starts as soon as everyone is in
+                "host" -> {
+                    val players = intent.getIntExtra(KEY_NETPLAY_PLAYERS, 0)
+                    MelonEmulator.requestNetplay(if (players > 1) "host:$players" else "host")
+                }
                 "guest" -> intent.getStringExtra(KEY_NETPLAY_ADDRESS)
                     ?.takeIf { it.isNotBlank() }
                     ?.let { MelonEmulator.requestNetplay("join:$it") }

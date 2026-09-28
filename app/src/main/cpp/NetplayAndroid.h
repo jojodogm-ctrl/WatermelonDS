@@ -18,7 +18,11 @@
 namespace NetplayAndroid
 {
 
-// The instance ID of the mirror console, next to the local one (0).
+// Up to four players: the host is player 0, the guests 1 to 3.
+constexpr int kMaxPlayers = 4;
+
+// Only picks the MAC address of the arguments a mirror is built from, which
+// the other player's firmware then replaces.
 constexpr int kMirrorInstanceId = 1;
 
 using ArgsFactory = std::function<std::unique_ptr<melonDS::NDSArgs>()>;
@@ -40,9 +44,14 @@ void Request(const std::string& request);
 void BeforeLocalFrame(melonDS::NDS* local, melonDS::u32 liveKeys, bool liveTouching, melonDS::u16 liveX, melonDS::u16 liveY);
 void AfterLocalFrame(melonDS::NDS* local, int localId);
 
-// Platform callbacks receive the mirror's userdata too: these tell it apart.
+// Platform callbacks receive the mirrors' userdata too: these tell them apart.
 bool IsMirror(void* userdata);
-melonDS::NDS* MirrorNDS();
+melonDS::NDS* MirrorNDS(void* userdata);
+int MirrorId(void* userdata);
+
+// The number the multiplayer interface knows the local console by: its player
+// number during a session, the same on every device, else its own instance ID.
+int LocalMpId(int instanceId);
 
 void Stop();
 

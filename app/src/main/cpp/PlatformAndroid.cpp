@@ -524,14 +524,14 @@ namespace Platform
         int inst;
         if (NetplayAndroid::IsMirror(userdata))
         {
-            nds = NetplayAndroid::MirrorNDS();
-            inst = NetplayAndroid::kMirrorInstanceId;
+            nds = NetplayAndroid::MirrorNDS(userdata);
+            inst = NetplayAndroid::MirrorId(userdata);
         }
         else
         {
             auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
             nds = emulatorInstance->getNDS();
-            inst = emulatorInstance->getInstanceId();
+            inst = NetplayAndroid::LocalMpId(emulatorInstance->getInstanceId());
         }
         if (nds)
             MPInterface::Get().SetNow(inst, nds->GetSysTimestamp());
