@@ -117,9 +117,14 @@ u32 HashBytes(const u8* data, u32 len, u32 step)
 // frame each console started the session at, to hash every frame early on
 u32 localStart = 0, mirrorStart = 0;
 
+// Determinism diagnostics, off unless debug.wmds.diag=1 when the session
+// starts: the section hashes take a full savestate of both consoles every
+// 300 frames, a hitch you can hear.
+bool diagnostics = false;
+
 void LogCheck(const char* role, NDS* nds)
 {
-    if (!nds->MainRAM)
+    if (!diagnostics || !nds->MainRAM)
         return;
 
     // Every frame for the first 600: the first frame where two sides disagree
@@ -505,6 +510,7 @@ bool Handshake(NDS* local, int localId, const ArgsFactory& mirrorArgs, const std
             mirrorQueue.push_back({Msg_Input, mirror->NumFrames + i, 0xFFF, 0, 0, 0});
     }
 
+    diagnostics = Property("debug.wmds.diag") == "1";
     std::string d = Property("debug.wmds.delay");
     simDelayMs = d.empty() ? 0 : (u32)atoi(d.c_str());
 
