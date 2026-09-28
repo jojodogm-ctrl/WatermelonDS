@@ -22,6 +22,7 @@
 #include "Platform.h"
 #include "Savestate.h"
 #include "MelonInstance.h"
+#include "NetplayAndroid.h"
 #include "RewindManager.h"
 #include "ROMManager.h"
 #include "MPInterface.h"
@@ -809,6 +810,14 @@ namespace MelonDSAndroid
     u32 loop(bool frameskipSolicitado, int frameskipModo, int frameskipManualN, bool drsActivo, bool drsDeuda)
     {
         MPInterface::Get().Process();
+        if (instance != nullptr && currentConfiguration != nullptr)
+        {
+            auto config = currentConfiguration;
+            NetplayAndroid::Poll(instance->getNDS(), instance->getInstanceId(), [config]() -> std::unique_ptr<melonDS::NDSArgs> {
+                auto args = BuildArgsFromConfiguration(*config, NetplayAndroid::kMirrorInstanceId);
+                return args.has_value() ? std::move(args.value()) : nullptr;
+            });
+        }
         if (currentConfiguration != nullptr && currentConfiguration->renderer != Renderer::Vulkan)
             setupOpenGlContext();
         instance->configurarFrameskip(frameskipModo, frameskipManualN);

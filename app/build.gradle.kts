@@ -42,7 +42,7 @@ android {
         manifestPlaceholders["appName"] = "@string/app_name"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))
+            abiFilters.addAll(listOf("arm64-v8a"))
         }
         externalNativeBuild {
             cmake {
@@ -71,7 +71,7 @@ android {
             applicationIdSuffix = ".dev"
             externalNativeBuild {
                 cmake {
-                    arguments("-DMELONDS_ANDROID_DEBUG_BUILD=1")
+                    arguments("-DMELONDS_ANDROID_DEBUG_BUILD=1", "-DCMAKE_BUILD_TYPE=Release")
                 }
             }
         }

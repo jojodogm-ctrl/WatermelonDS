@@ -135,7 +135,7 @@ add_subdirectory("${ANDROID_CPP_DIR}/enet" ./enet)
 
 set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(ZSTD_BUILD_COMPRESSION OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_COMPRESSION ON CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_DECOMPRESSION ON CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_DICTBUILDER OFF CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_DEPRECATED OFF CACHE BOOL "" FORCE)
@@ -177,6 +177,7 @@ add_library(
         "${ANDROID_CPP_DIR}/OboeCallback.cpp"
         "${ANDROID_CPP_DIR}/OpenGLContext.cpp"
         "${ANDROID_CPP_DIR}/PlatformAndroid.cpp"
+        "${ANDROID_CPP_DIR}/NetplayAndroid.cpp"
         "${ANDROID_CPP_DIR}/PlatformAndroid_AAC.cpp"
         "${ANDROID_CPP_DIR}/RetroAchievementsMapper.cpp"
         "${ANDROID_CPP_DIR}/RewindManager.cpp"
@@ -219,6 +220,7 @@ target_include_directories(melonDS-android-frontend PUBLIC
         "${ANDROID_CPP_DIR}/faad2/include"
         "${ANDROID_CPP_DIR}/rcheevos/include"
         "${ANDROID_CPP_DIR}/zstd/lib"
+        "${ANDROID_CPP_DIR}/enet/include"
         "${LIBRASHADER_INCLUDE_DIR}"
 )
 
@@ -234,6 +236,7 @@ target_link_libraries(melonDS-android-frontend
         ${jnigraphics-lib}
         core
         net-utils
+        enet
         oboe
         faad
         rcheevos

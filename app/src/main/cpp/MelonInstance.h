@@ -40,6 +40,7 @@ public:
     ~MelonInstance();
 
     int getInstanceId() { return instanceId; };
+    melonDS::NDS* getNDS() { return nds; }
     Renderer getCurrentRenderer() const { return currentRenderer; }
 
     bool loadRom(std::string romPath, std::string sramPath);
@@ -416,6 +417,10 @@ private:
     std::unique_ptr<SaveManager> gbaSave;
     std::unique_ptr<SaveManager> firmwareSave;
     u32 inputMask;
+    // live touch, read by netplay before each frame instead of reaching the
+    // console directly
+    bool liveTouching = false;
+    u16 liveTouchX = 0, liveTouchY = 0;
     std::atomic<float> slot2AnalogX = 0.0f;
     std::atomic<float> slot2AnalogY = 0.0f;
 

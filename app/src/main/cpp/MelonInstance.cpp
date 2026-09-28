@@ -26,6 +26,7 @@
 #include "GPU3D_Vulkan.h"
 #include "MelonDS.h"
 #include "MelonInstance.h"
+#include "NetplayAndroid.h"
 #include "ndz/NdzRomLoader.h"
 #include "NDS.h"
 #include "NDSCart.h"
@@ -3588,7 +3589,9 @@ u32 MelonInstance::runFrame(bool frameskipSolicitado)
         ndsRunStartNs = preSubidaFinNs;
     }
     processExactLiveGuideBeforeRunFrame();
+    NetplayAndroid::BeforeLocalFrame(nds, inputMask, liveTouching, liveTouchX, liveTouchY);
     u32 nLines = nds->RunFrame();
+    NetplayAndroid::AfterLocalFrame(nds, instanceId);
     vulkanFrameskipSaltosConsecutivos =
         vulkanFrameskipEsteFotograma ? vulkanFrameskipSaltosConsecutivos + 1 : 0;
     const std::int64_t exactGuideCompletedFrame =
@@ -3892,14 +3895,22 @@ void MelonInstance::touchScreen(u16 x, u16 y)
 {
     abortExactLiveGuide(
         static_cast<std::uint32_t>(ExactLiveGuide::AbortReason::ExternalTouch));
-    nds->TouchScreen(x, y);
+    liveTouching = true;
+    liveTouchX = x;
+    liveTouchY = y;
+    // under netplay input reaches the console through the delayed queue only,
+    // at a frame boundary, the same frame on both devices
+    if (!NetplayAndroid::Active())
+        nds->TouchScreen(x, y);
 }
 
 void MelonInstance::releaseScreen()
 {
     abortExactLiveGuide(
         static_cast<std::uint32_t>(ExactLiveGuide::AbortReason::ExternalTouch));
-    nds->ReleaseScreen();
+    liveTouching = false;
+    if (!NetplayAndroid::Active())
+        nds->ReleaseScreen();
 }
 
 ExactLiveGuide::Telemetry MelonInstance::captureExactLiveGuideTelemetry() const noexcept
@@ -4152,7 +4163,8 @@ void MelonInstance::pressKey(u32 key)
     else
     {
         inputMask &= ~(1 << key);
-        nds->SetKeyMask(inputMask);
+        if (!NetplayAndroid::Active())
+            nds->SetKeyMask(inputMask);
     }
 }
 
@@ -4166,7 +4178,8 @@ void MelonInstance::releaseKey(u32 key)
     else
     {
         inputMask |= (1 << key);
-        nds->SetKeyMask(inputMask);
+        if (!NetplayAndroid::Active())
+            nds->SetKeyMask(inputMask);
     }
 }
 

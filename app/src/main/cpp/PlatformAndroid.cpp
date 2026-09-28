@@ -35,6 +35,7 @@
 #include "MelonInstance.h"
 #include "MelonLog.h"
 #include "net/MPInterface.h"
+#include "NetplayAndroid.h"
 
 using namespace melonDS;
 
@@ -67,6 +68,7 @@ namespace Platform
 
     void SignalStop(StopReason reason, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         MelonDSAndroid::eventMessenger->onEmulatorStop(reason);
     }
 
@@ -462,6 +464,7 @@ namespace Platform
 
     void WriteNDSSave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
         if (emulatorInstance)
             emulatorInstance->requestNdsSaveWrite(savedata, savelen, writeoffset, writelen);
@@ -469,6 +472,7 @@ namespace Platform
 
     void WriteGBASave(const u8* savedata, u32 savelen, u32 writeoffset, u32 writelen, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
         if (emulatorInstance)
             emulatorInstance->requestGbaSaveWrite(savedata, savelen, writeoffset, writelen);
@@ -476,6 +480,7 @@ namespace Platform
 
     void WriteFirmware(const Firmware& firmware, u32 writeoffset, u32 writelen, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
         if (!emulatorInstance)
             return;
@@ -510,68 +515,98 @@ namespace Platform
         // TODO
     }
 
+    // The mirror console of a netplay session shares these callbacks: its
+    // userdata is not a MelonInstance. Every MP call first publishes the
+    // caller's emulated time, which the deterministic interface runs on.
+    static int mpNow(void* userdata)
+    {
+        melonDS::NDS* nds;
+        int inst;
+        if (NetplayAndroid::IsMirror(userdata))
+        {
+            nds = NetplayAndroid::MirrorNDS();
+            inst = NetplayAndroid::kMirrorInstanceId;
+        }
+        else
+        {
+            auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
+            nds = emulatorInstance->getNDS();
+            inst = emulatorInstance->getInstanceId();
+        }
+        if (nds)
+            MPInterface::Get().SetNow(inst, nds->GetSysTimestamp());
+        return inst;
+    }
+
+    void MP_Tick(void* userdata)
+    {
+        mpNow(userdata);
+    }
+
     void MP_Begin(void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        MPInterface::Get().Begin(emulatorInstance->getInstanceId());
+        int inst = mpNow(userdata);
+        MPInterface::Get().Begin(inst);
     }
 
     void MP_End(void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        MPInterface::Get().End(emulatorInstance->getInstanceId());
+        int inst = mpNow(userdata);
+        MPInterface::Get().End(inst);
     }
 
     int MP_SendPacket(u8* data, int len, u64 timestamp, void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        return MPInterface::Get().SendPacket(emulatorInstance->getInstanceId(), data, len, timestamp);
+        int inst = mpNow(userdata);
+        return MPInterface::Get().SendPacket(inst, data, len, timestamp);
     }
 
     int MP_RecvPacket(u8* data, u64* timestamp, void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        return MPInterface::Get().RecvPacket(emulatorInstance->getInstanceId(), data, timestamp);
+        int inst = mpNow(userdata);
+        return MPInterface::Get().RecvPacket(inst, data, timestamp);
     }
 
     int MP_SendCmd(u8* data, int len, u64 timestamp, void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        return MPInterface::Get().SendCmd(emulatorInstance->getInstanceId(), data, len, timestamp);
+        int inst = mpNow(userdata);
+        return MPInterface::Get().SendCmd(inst, data, len, timestamp);
     }
 
     int MP_SendReply(u8* data, int len, u64 timestamp, u16 aid, void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        return MPInterface::Get().SendReply(emulatorInstance->getInstanceId(), data, len, timestamp, aid);
+        int inst = mpNow(userdata);
+        return MPInterface::Get().SendReply(inst, data, len, timestamp, aid);
     }
 
     int MP_SendAck(u8* data, int len, u64 timestamp, void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        return MPInterface::Get().SendAck(emulatorInstance->getInstanceId(), data, len, timestamp);
+        int inst = mpNow(userdata);
+        return MPInterface::Get().SendAck(inst, data, len, timestamp);
     }
 
     int MP_RecvHostPacket(u8* data, u64* timestamp, void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        return MPInterface::Get().RecvHostPacket(emulatorInstance->getInstanceId(), data, timestamp);
+        int inst = mpNow(userdata);
+        return MPInterface::Get().RecvHostPacket(inst, data, timestamp);
     }
 
     u16 MP_RecvReplies(u8* data, u64 timestamp, u16 aidmask, void* userdata)
     {
-        auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
-        return MPInterface::Get().RecvReplies(emulatorInstance->getInstanceId(), data, timestamp, aidmask);
+        int inst = mpNow(userdata);
+        return MPInterface::Get().RecvReplies(inst, data, timestamp, aidmask);
     }
 
     int Net_SendPacket(u8* data, int len, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return len;
         auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
         return emulatorInstance->sendNetPacket(data, len);
     }
 
     int Net_RecvPacket(u8* data, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return 0;
         auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
         return emulatorInstance->receiveNetPacket(data);
     }
@@ -583,16 +618,24 @@ namespace Platform
 
     void Mic_Start(void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         MelonDSAndroid::enableMic();
     }
 
     void Mic_Stop(void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         MelonDSAndroid::disableMic();
     }
 
     int Mic_ReadInput(s16* data, int maxlength, void* userdata)
     {
+        // both devices must feed both consoles the same thing: silence
+        if (NetplayAndroid::Active() || NetplayAndroid::IsMirror(userdata))
+        {
+            memset(data, 0, maxlength * sizeof(s16));
+            return maxlength;
+        }
         return MelonDSAndroid::readMic(data, maxlength);
     }
 
@@ -603,16 +646,19 @@ namespace Platform
 
     void Camera_Start(int num, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         MelonDSAndroid::cameraHandler->startCamera(num);
     }
 
     void Camera_Stop(int num, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         MelonDSAndroid::cameraHandler->stopCamera(num);
     }
 
     void Camera_CaptureFrame(int num, u32* frame, int width, int height, bool yuv, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         MelonDSAndroid::cameraHandler->captureFrame(num, frame, width, height, yuv);
     }
 
@@ -623,11 +669,13 @@ namespace Platform
 
     void Addon_RumbleStart(u32 len, void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         MelonDSAndroid::eventMessenger->onRumbleStart(len);
     }
 
     void Addon_RumbleStop(void* userdata)
     {
+        if (NetplayAndroid::IsMirror(userdata)) return;
         MelonDSAndroid::eventMessenger->onRumbleStop();
     }
 
