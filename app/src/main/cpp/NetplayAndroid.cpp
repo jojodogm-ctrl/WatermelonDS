@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -44,6 +45,7 @@ enum MsgType : u8
     Msg_Start = 4,    // host -> all: the session starts with this many players
     Msg_Package = 5,  // anyone -> host -> others: a console to mirror
     Msg_Input = 6,    // anyone -> host -> others: one frame of one player's input
+    Msg_Check = 7,    // anyone -> host -> others: fingerprint of one console at one frame
 };
 
 #pragma pack(push, 1)
@@ -76,6 +78,27 @@ struct InputFrame
     u8 Touching;
     u16 X;
     u16 Y;
+};
+
+// Every device fingerprints every console it runs, its own and its mirrors,
+// and sends them all: the same console fingerprinted on two devices at the
+// same frame must match, and the first pair that does not says when and in
+// which part the two copies parted. Cheap enough to stay on in every session.
+struct Check
+{
+    u8 Type;
+    u8 Player;   // the console
+    u8 Origin;   // the device that fingerprinted it
+    u32 Frame;
+    u32 Keys;
+    u32 Ram;
+    u32 Wram;
+    u32 Regs9;
+    u32 Regs7;
+    u32 Jit;
+    u64 Sys;
+    u64 A9;
+    u64 A7;
 };
 #pragma pack(pop)
 
@@ -119,6 +142,7 @@ std::deque<std::pair<u64, InputFrame>> delayed;
 
 std::mutex outLock;
 std::deque<InputFrame> outQueue;
+std::deque<Check> checkOut;
 
 bool diagnostics = false;
 
@@ -188,6 +212,110 @@ void LogCheck(int player, NDS* nds, u32 start)
         off += slen;
     }
     NP_LOG("[netplay] p%d SECT frame=%u%s", player, nds->NumFrames, line.c_str());
+}
+
+constexpr u32 kCheckEvery = 60;
+
+std::mutex checkLock;
+std::map<u64, Check> checks; // (player << 32 | frame) -> this device's fingerprint
+std::map<u64, Check> remoteChecks;
+bool desyncLogged[kMaxPlayers] = {};
+u32 desyncCount[kMaxPlayers] = {};
+
+u32 HashWords(const u8* data, u32 len)
+{
+    const u32* w = (const u32*)data;
+    u32 h = 2166136261u;
+    for (u32 i = 0; i < len / 4; i++)
+        h = (h ^ w[i]) * 16777619u;
+    return h;
+}
+
+Check MakeCheck(int player, NDS* nds)
+{
+    Check c {};
+    c.Type = Msg_Check;
+    c.Player = (u8)player;
+    c.Origin = (u8)myPlayer;
+    c.Frame = nds->NumFrames;
+    c.Keys = nds->KeyInput;
+    c.Ram = HashWords(nds->MainRAM, nds->MainRAMMask + 1);
+    c.Wram = HashWords(nds->SharedWRAM, nds->SharedWRAMSize) ^ (HashWords(nds->ARM7WRAM, nds->ARM7WRAMSize) * 31u);
+    c.Regs9 = HashWords((const u8*)nds->ARM9.R, sizeof(nds->ARM9.R)) ^ nds->ARM9.CPSR;
+    c.Regs7 = HashWords((const u8*)nds->ARM7.R, sizeof(nds->ARM7.R)) ^ nds->ARM7.CPSR;
+    c.Jit = (nds->IsJITEnabled() ? 1u : 0u) | ((u32)nds->JIT.GetMaxBlockSize() << 1)
+        | (nds->JIT.LiteralOptimizationsEnabled() ? 1u << 16 : 0u)
+        | (nds->JIT.BranchOptimizationsEnabled() ? 1u << 17 : 0u)
+        | (nds->JIT.FastMemoryEnabled() ? 1u << 18 : 0u);
+    c.Sys = nds->GetSysTimestamp();
+    c.A9 = nds->ARM9Timestamp;
+    c.A7 = nds->ARM7Timestamp;
+    return c;
+}
+
+// Caller holds checkLock.
+void Compare(const Check& a, const Check& b)
+{
+    int p = a.Player;
+    if (p >= kMaxPlayers) return;
+    bool same = a.Keys == b.Keys && a.Ram == b.Ram && a.Wram == b.Wram && a.Regs9 == b.Regs9
+        && a.Regs7 == b.Regs7 && a.Sys == b.Sys && a.A9 == b.A9 && a.A7 == b.A7;
+    if (same) return;
+    desyncCount[p]++;
+    if (desyncLogged[p])
+    {
+        if (desyncCount[p] % 30 == 0)
+            NP_LOG("[netplay] DESYNC p%d still apart at frame %u (%u checks)", p, a.Frame, desyncCount[p]);
+        return;
+    }
+    desyncLogged[p] = true;
+    NP_LOG("[netplay] DESYNC p%d first seen at frame %u, device %d vs device %d:%s%s%s%s%s%s%s%s%s",
+           p, a.Frame, a.Origin, b.Origin,
+           a.Keys != b.Keys ? " KEYS" : "", a.Ram != b.Ram ? " RAM" : "", a.Wram != b.Wram ? " WRAM" : "",
+           a.Regs9 != b.Regs9 ? " ARM9-REGS" : "", a.Regs7 != b.Regs7 ? " ARM7-REGS" : "",
+           a.Sys != b.Sys ? " SYS-CLOCK" : "", a.A9 != b.A9 ? " ARM9-CLOCK" : "", a.A7 != b.A7 ? " ARM7-CLOCK" : "",
+           a.Jit != b.Jit ? " JIT-SETTINGS" : "");
+    NP_LOG("[netplay] DESYNC p%d detail: keys %08X/%08X sys %llu/%llu a9 %llu/%llu a7 %llu/%llu jit %08X/%08X",
+           p, a.Keys, b.Keys, (unsigned long long)a.Sys, (unsigned long long)b.Sys,
+           (unsigned long long)a.A9, (unsigned long long)b.A9, (unsigned long long)a.A7, (unsigned long long)b.A7,
+           a.Jit, b.Jit);
+}
+
+void Prune(std::map<u64, Check>& m, int player, u32 frame)
+{
+    if (frame < kCheckEvery * 20) return;
+    u64 lo = (u64)player << 32;
+    u64 hi = lo | (frame - kCheckEvery * 20);
+    m.erase(m.lower_bound(lo), m.upper_bound(hi));
+}
+
+void QueueCheck(const Check& c);
+
+// A console just finished a frame on this device.
+void Fingerprint(int player, NDS* nds)
+{
+    if ((nds->NumFrames % kCheckEvery) != 0 || !nds->MainRAM) return;
+    Check c = MakeCheck(player, nds);
+    u64 key = ((u64)player << 32) | c.Frame;
+    {
+        std::lock_guard<std::mutex> lk(checkLock);
+        checks[key] = c;
+        auto it = remoteChecks.find(key);
+        if (it != remoteChecks.end()) { Compare(c, it->second); remoteChecks.erase(it); }
+        Prune(checks, player, c.Frame);
+    }
+    QueueCheck(c);
+}
+
+void OnRemoteCheck(const Check& c)
+{
+    if (c.Player >= kMaxPlayers) return;
+    u64 key = ((u64)c.Player << 32) | c.Frame;
+    std::lock_guard<std::mutex> lk(checkLock);
+    auto it = checks.find(key);
+    if (it != checks.end()) Compare(it->second, c);
+    else remoteChecks[key] = c;
+    Prune(remoteChecks, c.Player, c.Frame);
 }
 
 void ApplyInput(NDS* nds, const InputFrame& f)
@@ -354,8 +482,15 @@ void MirrorLoop(Mirror* m)
         nds->RunFrame();
         MPInterface::Get().SetNow(m->Player, nds->GetSysTimestamp());
         LogCheck(m->Player, nds, m->StartFrame);
+        Fingerprint(m->Player, nds);
     }
     MPInterface::Get().Leave(m->Player);
+}
+
+void QueueCheck(const Check& c)
+{
+    std::lock_guard<std::mutex> lk(outLock);
+    checkOut.push_back(c);
 }
 
 void Deliver(const InputFrame& f)
@@ -387,6 +522,18 @@ void NetLoop()
                     SendTo(peers[0], &f, sizeof(f));
                 any = true;
             }
+            while (!checkOut.empty())
+            {
+                Check c = checkOut.front();
+                checkOut.pop_front();
+                if (IsHost())
+                {
+                    for (int p = 1; p < kMaxPlayers; p++) SendTo(peers[p], &c, sizeof(c));
+                }
+                else
+                    SendTo(peers[0], &c, sizeof(c));
+                any = true;
+            }
             if (any) enet_host_flush(host);
         }
 
@@ -403,7 +550,20 @@ void NetLoop()
             }
             if (evt.type != ENET_EVENT_TYPE_RECEIVE)
                 continue;
-            if (evt.packet->dataLength == sizeof(InputFrame) && evt.packet->data[0] == Msg_Input)
+            if (evt.packet->dataLength == sizeof(Check) && evt.packet->data[0] == Msg_Check)
+            {
+                Check c;
+                memcpy(&c, evt.packet->data, sizeof(c));
+                if (IsHost())
+                {
+                    bool relayed = false;
+                    for (int p = 1; p < kMaxPlayers; p++)
+                        if (p != c.Origin && peers[p]) { SendTo(peers[p], &c, sizeof(c)); relayed = true; }
+                    if (relayed) enet_host_flush(host);
+                }
+                OnRemoteCheck(c);
+            }
+            else if (evt.packet->dataLength == sizeof(InputFrame) && evt.packet->data[0] == Msg_Input)
             {
                 InputFrame f;
                 memcpy(&f, evt.packet->data, sizeof(f));
@@ -729,6 +889,16 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
 
     // The first LagFrames frames of each console have no input from anybody:
     // neutral on every device.
+    {
+        std::lock_guard<std::mutex> lk(checkLock);
+        checks.clear();
+        remoteChecks.clear();
+        for (int p = 0; p < kMaxPlayers; p++) { desyncLogged[p] = false; desyncCount[p] = 0; }
+    }
+    {
+        std::lock_guard<std::mutex> lk(outLock);
+        checkOut.clear();
+    }
     ownQueue.clear();
     for (u32 i = 0; i < kLagFrames; i++)
         ownQueue.push_back({Msg_Input, (u8)myPlayer, local->NumFrames + i, 0xFFF, 0, 0, 0});
@@ -849,6 +1019,7 @@ void AfterLocalFrame(NDS* local, int localId)
     if (!active.load()) return;
     MPInterface::Get().SetNow(myPlayer, local->GetSysTimestamp());
     LogCheck(myPlayer, local, localStart);
+    Fingerprint(myPlayer, local);
 }
 
 bool IsMirror(void* userdata)
