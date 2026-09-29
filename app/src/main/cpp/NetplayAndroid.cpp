@@ -34,7 +34,7 @@ namespace
 {
 
 constexpr u16 kPort = 8070;
-constexpr u32 kMagic = 0x4E504458; // "XDPN", v2: up to four players
+constexpr u32 kMagic = 0x4E504459; // v3: the package carries its console's JIT settings
 constexpr u32 kLagFrames = 4;
 
 enum MsgType : u8
@@ -377,6 +377,32 @@ bool GetBlob(const u8*& p, const u8* end, const u8*& data, u32& len)
     return true;
 }
 
+#pragma pack(push, 1)
+struct JitSettings
+{
+    u8 Enabled;
+    u32 MaxBlockSize;
+    u8 Literal;
+    u8 Branch;
+    u8 FastMemory;
+    u8 HgEngineFix;
+};
+#pragma pack(pop)
+
+JitSettings JitOf(NDS* nds)
+{
+    JitSettings j {};
+    j.Enabled = nds->IsJITEnabled() ? 1 : 0;
+#ifdef JIT_ENABLED
+    j.MaxBlockSize = (u32)nds->JIT.GetMaxBlockSize();
+    j.Literal = nds->JIT.LiteralOptimizationsEnabled() ? 1 : 0;
+    j.Branch = nds->JIT.BranchOptimizationsEnabled() ? 1 : 0;
+    j.FastMemory = nds->JIT.FastMemoryEnabled() ? 1 : 0;
+    j.HgEngineFix = nds->JIT.HgEngineFixEnabled() ? 1 : 0;
+#endif
+    return j;
+}
+
 // Everything another device needs to build a mirror of this console that is
 // the same machine in the same state: the savestate does not carry the
 // firmware (MAC address, player name), the BIOS, or the ROM. The ROM is not
@@ -391,6 +417,11 @@ std::vector<u8> BuildPackage(NDS* nds, Savestate& state)
     PutBlob(raw, nds->GetARM7BIOS().data(), (u32)nds->GetARM7BIOS().size());
     PutBlob(raw, nds->GetNDSSave() ? nds->GetNDSSave() : (const u8*)"", nds->GetNDSSave() ? nds->GetNDSSaveLength() : 0);
     PutBlob(raw, (const u8*)state.Buffer(), state.Length());
+    // The JIT settings are the player's own, and they are part of the machine: where
+    // blocks end decides when interrupts are seen. A mirror built with the receiving
+    // player's settings runs the same state on other timing and drifts away.
+    JitSettings jit = JitOf(nds);
+    PutBlob(raw, (const u8*)&jit, sizeof(jit));
 
     std::vector<u8> pkt(2 + 4 + ZSTD_compressBound(raw.size()));
     pkt[0] = Msg_Package;
@@ -420,6 +451,12 @@ NDS* BuildMirror(const std::vector<u8>& pkt, NDS* local, const ArgsFactory& mirr
     if (!GetBlob(p, end, fw, fwLen) || !GetBlob(p, end, bios9, bios9Len) || !GetBlob(p, end, bios7, bios7Len)
         || !GetBlob(p, end, save, saveLen) || !GetBlob(p, end, state, stateLen))
         return nullptr;
+    const u8* jitBlob;
+    u32 jitLen;
+    if (!GetBlob(p, end, jitBlob, jitLen) || jitLen != sizeof(JitSettings))
+        return nullptr;
+    JitSettings jit;
+    memcpy(&jit, jitBlob, sizeof(jit));
     if (bios9Len != ARM9BIOSSize || bios7Len != ARM7BIOSSize) return nullptr;
 
     auto args = mirrorArgs();
@@ -431,6 +468,23 @@ NDS* BuildMirror(const std::vector<u8>& pkt, NDS* local, const ArgsFactory& mirr
     args->ARM9BIOS = std::move(a9);
     args->ARM7BIOS = std::move(a7);
     args->Firmware = Firmware(fw, fwLen);
+    // The sender's JIT, never this device's: see BuildPackage.
+    if (jit.Enabled)
+    {
+        JITArgs j;
+        j.MaxBlockSize = jit.MaxBlockSize;
+        j.LiteralOptimizations = jit.Literal != 0;
+        j.BranchOptimizations = jit.Branch != 0;
+        j.FastMemory = jit.FastMemory != 0;
+        j.HgEngineFix = jit.HgEngineFix != 0;
+        args->JIT = j;
+    }
+    else
+    {
+        args->JIT = std::nullopt;
+    }
+    NP_LOG("[netplay] mirror JIT: enabled=%d block=%u lit=%d br=%d fast=%d hg=%d",
+           jit.Enabled, jit.MaxBlockSize, jit.Literal, jit.Branch, jit.FastMemory, jit.HgEngineFix);
 
     // the mirror's userdata is its slot: Platform callbacks find it back by address
     NDS* nds = new NDS(std::move(*args), &m);
