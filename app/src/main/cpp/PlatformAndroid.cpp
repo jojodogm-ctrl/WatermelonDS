@@ -599,14 +599,16 @@ namespace Platform
 
     int Net_SendPacket(u8* data, int len, void* userdata)
     {
-        if (NetplayAndroid::IsMirror(userdata)) return len;
+        // As the mic: the device's own network reaches one console and never its mirrors,
+        // so during netplay no console hears it. Local play goes through MP_*, not here.
+        if (NetplayAndroid::Active() || NetplayAndroid::IsMirror(userdata)) return len;
         auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
         return emulatorInstance->sendNetPacket(data, len);
     }
 
     int Net_RecvPacket(u8* data, void* userdata)
     {
-        if (NetplayAndroid::IsMirror(userdata)) return 0;
+        if (NetplayAndroid::Active() || NetplayAndroid::IsMirror(userdata)) return 0;
         auto emulatorInstance = (MelonDSAndroid::MelonInstance*) userdata;
         return emulatorInstance->receiveNetPacket(data);
     }

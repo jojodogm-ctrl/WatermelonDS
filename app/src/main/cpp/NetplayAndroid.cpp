@@ -34,7 +34,7 @@ namespace
 {
 
 constexpr u16 kPort = 8070;
-constexpr u32 kMagic = 0x4E504459; // v3: the package carries its console's JIT settings
+constexpr u32 kMagic = 0x4E50445A; // v4: checks carry per-block memory hashes
 constexpr u32 kLagFrames = 4;
 
 enum MsgType : u8
@@ -99,6 +99,10 @@ struct Check
     u64 Sys;
     u64 A9;
     u64 A7;
+    // Where the memory parted: main RAM in 16 KB blocks, shared WRAM and ARM7 WRAM in 4 KB.
+    u32 RamBlocks[256];
+    u32 SharedBlocks[8];
+    u32 Arm7Blocks[16];
 };
 #pragma pack(pop)
 
@@ -247,6 +251,13 @@ Check MakeCheck(int player, NDS* nds)
         | (nds->JIT.LiteralOptimizationsEnabled() ? 1u << 16 : 0u)
         | (nds->JIT.BranchOptimizationsEnabled() ? 1u << 17 : 0u)
         | (nds->JIT.FastMemoryEnabled() ? 1u << 18 : 0u);
+    const u32 ramLen = nds->MainRAMMask + 1;
+    for (u32 i = 0; i < 256 && (i + 1) * 0x4000 <= ramLen; i++)
+        c.RamBlocks[i] = HashWords(nds->MainRAM + i * 0x4000, 0x4000);
+    for (u32 i = 0; i < 8 && (i + 1) * 0x1000 <= nds->SharedWRAMSize; i++)
+        c.SharedBlocks[i] = HashWords(nds->SharedWRAM + i * 0x1000, 0x1000);
+    for (u32 i = 0; i < 16 && (i + 1) * 0x1000 <= nds->ARM7WRAMSize; i++)
+        c.Arm7Blocks[i] = HashWords(nds->ARM7WRAM + i * 0x1000, 0x1000);
     c.Sys = nds->GetSysTimestamp();
     c.A9 = nds->ARM9Timestamp;
     c.A7 = nds->ARM7Timestamp;
@@ -279,6 +290,17 @@ void Compare(const Check& a, const Check& b)
            p, a.Keys, b.Keys, (unsigned long long)a.Sys, (unsigned long long)b.Sys,
            (unsigned long long)a.A9, (unsigned long long)b.A9, (unsigned long long)a.A7, (unsigned long long)b.A7,
            a.Jit, b.Jit);
+    // The blocks that differ, as DS addresses: main RAM at 0x02000000, shared WRAM
+    // at 0x03000000, ARM7 WRAM at 0x03800000.
+    std::string where;
+    char buf[48];
+    for (int i = 0; i < 256; i++)
+        if (a.RamBlocks[i] != b.RamBlocks[i]) { snprintf(buf, sizeof(buf), " %08X", 0x02000000 + i * 0x4000); where += buf; }
+    for (int i = 0; i < 8; i++)
+        if (a.SharedBlocks[i] != b.SharedBlocks[i]) { snprintf(buf, sizeof(buf), " W%08X", 0x03000000 + i * 0x1000); where += buf; }
+    for (int i = 0; i < 16; i++)
+        if (a.Arm7Blocks[i] != b.Arm7Blocks[i]) { snprintf(buf, sizeof(buf), " A%08X", 0x03800000 + i * 0x1000); where += buf; }
+    NP_LOG("[netplay] DESYNC p%d blocks:%s", p, where.c_str());
 }
 
 void Prune(std::map<u64, Check>& m, int player, u32 frame)
@@ -294,7 +316,8 @@ void QueueCheck(const Check& c);
 // A console just finished a frame on this device.
 void Fingerprint(int player, NDS* nds)
 {
-    if ((nds->NumFrames % kCheckEvery) != 0 || !nds->MainRAM) return;
+    // Every frame of the first second, then once a second: the first frame apart is the lead.
+    if ((nds->NumFrames > kCheckEvery && (nds->NumFrames % kCheckEvery) != 0) || !nds->MainRAM) return;
     Check c = MakeCheck(player, nds);
     u64 key = ((u64)player << 32) | c.Frame;
     {
@@ -922,6 +945,10 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
     // kept running still had its own, and ran its first frame 8 to 18 cycles
     // apart from its mirror. Measured: every frame off from the first one.
     {
+        // Reset first, as the mirrors are built: a savestate leaves some fields as they
+        // were (CyclesToRun among them), and a console that had been running kept its own.
+        // Measured with the interpreter: the first frame one cycle apart, then memory.
+        local->Reset();
         Savestate reload(ownState.Buffer(), ownState.Length(), false);
         if (reload.Error || !local->DoSavestate(&reload))
             NP_LOG("[netplay] WARNING could not reload our own state, expect a desync");
