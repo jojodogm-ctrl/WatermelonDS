@@ -135,7 +135,7 @@ fun NetplayDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(onClick = onDismiss, colors = melonTextButtonColors()) {
-                        Text(stringResource(R.string.cancel).uppercase(), style = MaterialTheme.typography.button)
+                        Text(stringResource(R.string.netplay_cancel).uppercase(), style = MaterialTheme.typography.button)
                     }
                     TextButton(
                         onClick = { onStart(host, address, portValue ?: NETPLAY_DEFAULT_PORT, playersValue ?: 2) },

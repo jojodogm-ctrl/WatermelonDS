@@ -1138,4 +1138,5 @@
     <string name="netplay_host_hint">Give your IP address and port to the other players. The port must be reachable from their network (port forwarding, or a VPN like Tailscale). Everyone needs the same game and the same WatermelonDS version.</string>
     <string name="netplay_join_hint">Enter the host\'s IP address and port. Everyone needs the same game and the same WatermelonDS version.</string>
     <string name="netplay_start">Start</string>
+    <string name="netplay_cancel">Cancel</string>
 </resources>

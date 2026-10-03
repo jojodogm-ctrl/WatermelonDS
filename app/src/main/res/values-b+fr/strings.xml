@@ -446,13 +446,4 @@
         <item>Ajuster en bas</item>
         <item>Ajuster à droite</item>
     </string-array>
-    <string name="netplay">Netplay</string>
-    <string name="netplay_host">Héberger</string>
-    <string name="netplay_join">Rejoindre</string>
-    <string name="netplay_host_address">Adresse IP de l\'hôte</string>
-    <string name="netplay_port">Port (UDP)</string>
-    <string name="netplay_players">Joueurs (2 à 4)</string>
-    <string name="netplay_host_hint">Donnez votre adresse IP et le port aux autres joueurs. Le port doit être joignable depuis leur réseau (redirection de port, ou un VPN comme Tailscale). Tout le monde doit avoir le même jeu et la même version de WatermelonDS.</string>
-    <string name="netplay_join_hint">Entrez l\'adresse IP et le port de l\'hôte. Tout le monde doit avoir le même jeu et la même version de WatermelonDS.</string>
-    <string name="netplay_start">Lancer</string>
 </resources>
