@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -49,6 +50,7 @@ fun RomContextMenu(
     onShowDetails: (Rom) -> Unit,
     onSendSaveFile: (Rom) -> Unit,
     onImportSaveFile: (Rom) -> Unit,
+    onNetplay: (Rom) -> Unit,
     raCoverUrl: String? = null,
 ) {
     if (rom == null) return
@@ -138,6 +140,15 @@ fun RomContextMenu(
                     label = stringResource(R.string.rom_action_import_save_file),
                     onClick = {
                         onImportSaveFile(rom)
+                        onDismiss()
+                    },
+                )
+                ContextItem(
+                    icon = Icons.Filled.Wifi,
+                    iconTint = colors.text2,
+                    label = stringResource(R.string.netplay),
+                    onClick = {
+                        onNetplay(rom)
                         onDismiss()
                     },
                 )

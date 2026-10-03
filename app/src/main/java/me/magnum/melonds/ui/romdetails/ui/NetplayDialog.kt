@@ -38,6 +38,9 @@ import me.magnum.melonds.ui.common.melonTextButtonColors
 
 const val NETPLAY_DEFAULT_PORT = 8070
 
+/** Netplay settings from [NetplayDialog], held while the ROM passes launch validation. */
+data class NetplayRequest(val host: Boolean, val address: String, val port: Int, val players: Int)
+
 /**
  * Manual netplay: host or join by address and port. Deliberately bare: no
  * discovery, no relay, the players sort out their own network.

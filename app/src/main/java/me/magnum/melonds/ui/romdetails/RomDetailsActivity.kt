@@ -30,6 +30,7 @@ import me.magnum.melonds.impl.RomSaveFileManager
 import me.magnum.melonds.ui.common.rom.EmulatorLaunchValidatorDelegate
 import me.magnum.melonds.ui.emulator.EmulatorActivity
 import me.magnum.melonds.ui.romdetails.model.RomDetailsToastEvent
+import me.magnum.melonds.ui.romdetails.ui.NetplayRequest
 import me.magnum.melonds.ui.romdetails.ui.RomDetailsScreen
 import me.magnum.melonds.ui.romlist.boxart.BoxArtRepository
 import me.magnum.melonds.ui.theme.MelonTheme
@@ -113,7 +114,7 @@ class RomDetailsActivity : AppCompatActivity() {
                 val netplay = pendingNetplay
                 pendingNetplay = null
                 val intent = if (netplay != null) {
-                    EmulatorActivity.getRomNetplayIntent(this@RomDetailsActivity, rom, netplay.role, netplay.address, netplay.port, netplay.players)
+                    EmulatorActivity.getRomNetplayIntent(this@RomDetailsActivity, rom, netplay)
                 } else {
                     EmulatorActivity.getRomEmulatorActivityIntent(this@RomDetailsActivity, rom)
                 }
@@ -219,7 +220,7 @@ class RomDetailsActivity : AppCompatActivity() {
                         saveFileImportLauncher.launch(arrayOf("*/*"))
                     },
                     onNetplay = { host, address, port, players ->
-                        pendingNetplay = NetplayRequest(if (host) "host" else "guest", address, port, players)
+                        pendingNetplay = NetplayRequest(host, address, port, players)
                         emulatorLauncherValidatorDelegate.validateRom(rom)
                     },
                     onAchievementFocused = { focusedAchievement.value = it },
@@ -232,8 +233,6 @@ class RomDetailsActivity : AppCompatActivity() {
     }
 
     /** Netplay settings waiting for the ROM to pass validation. */
-    private data class NetplayRequest(val role: String, val address: String, val port: Int, val players: Int)
-
     private var pendingNetplay: NetplayRequest? = null
 
     private fun shareSaveFile(rom: Rom) {

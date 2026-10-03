@@ -89,6 +89,7 @@ import me.magnum.melonds.domain.model.layout.Insets
 import me.magnum.melonds.domain.model.layout.LayoutComponent
 import me.magnum.melonds.domain.model.layout.ScreenFold
 import me.magnum.melonds.domain.model.rom.Rom
+import me.magnum.melonds.ui.romdetails.ui.NetplayRequest
 import me.magnum.melonds.domain.model.rom.config.RuntimeMicSource
 import me.magnum.melonds.domain.model.ui.Orientation
 import me.magnum.melonds.domain.repositories.SettingsRepository
@@ -192,12 +193,12 @@ class EmulatorActivity : AppCompatActivity() {
         const val KEY_NETPLAY_PORT = "eu.emufii.netplay.port"
 
         /** A game started in netplay from the ROM details screen, without a launcher. */
-        fun getRomNetplayIntent(context: Context, rom: Rom, role: String, address: String, port: Int, players: Int): Intent {
+        fun getRomNetplayIntent(context: Context, rom: Rom, netplay: NetplayRequest): Intent {
             return getRomEmulatorActivityIntent(context, rom).apply {
-                putExtra(KEY_NETPLAY_ROLE, role)
-                putExtra(KEY_NETPLAY_ADDRESS, address)
-                putExtra(KEY_NETPLAY_PORT, port)
-                putExtra(KEY_NETPLAY_PLAYERS, players)
+                putExtra(KEY_NETPLAY_ROLE, if (netplay.host) "host" else "guest")
+                putExtra(KEY_NETPLAY_ADDRESS, netplay.address)
+                putExtra(KEY_NETPLAY_PORT, netplay.port)
+                putExtra(KEY_NETPLAY_PLAYERS, netplay.players)
             }
         }
 

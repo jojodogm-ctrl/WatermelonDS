@@ -35,6 +35,8 @@ import me.magnum.melonds.parcelables.RomParcelable
 import me.magnum.melonds.R
 import me.magnum.melonds.ui.romdetails.RomDetailsActivity
 import me.magnum.melonds.ui.romlist.composables.RomBrowserScreen
+import me.magnum.melonds.ui.romdetails.ui.NetplayDialog
+import me.magnum.melonds.ui.romdetails.ui.NetplayRequest
 import me.magnum.melonds.ui.romlist.composables.RomContextMenu
 import me.magnum.melonds.ui.theme.MelonTheme
 
@@ -97,6 +99,7 @@ class RomListFragment : Fragment() {
                     val raCoverByUri by romListViewModel.raCoverByUri.collectAsState()
                     val boxArtByUri by romListViewModel.boxArtByUri.collectAsState()
                     var contextRomUri by remember { mutableStateOf<String?>(null) }
+                    var netplayRomUri by remember { mutableStateOf<String?>(null) }
                     var searchQuery by remember { mutableStateOf("") }
 
                     backPressedCallback.isEnabled = state.canNavigateUp && !state.isSearchActive
@@ -153,7 +156,25 @@ class RomListFragment : Fragment() {
                         onShowDetails = { rom -> openRomDetails(rom) },
                         onSendSaveFile = { rom -> shareSaveFile(rom) },
                         onImportSaveFile = { rom -> requestSaveFileImport(rom) },
+                        onNetplay = { rom -> netplayRomUri = rom.uri.toString() },
                     )
+
+                    val netplayRom: Rom? = remember(netplayRomUri, state.entries, state.continuePlaying) {
+                        val target = netplayRomUri ?: return@remember null
+                        state.entries.firstNotNullOfOrNull {
+                            (it as? RomBrowserEntry.RomItem)?.rom?.takeIf { r -> r.uri.toString() == target }
+                        } ?: state.continuePlaying.firstOrNull { it.uri.toString() == target }
+                    }
+                    if (netplayRom != null) {
+                        NetplayDialog(
+                            onDismiss = { netplayRomUri = null },
+                            onStart = { host, address, port, players ->
+                                netplayRomUri = null
+                                romListViewModel.setRomLastPlayedNow(netplayRom)
+                                (activity as? RomListActivity)?.launchNetplay(netplayRom, NetplayRequest(host, address, port, players))
+                            },
+                        )
+                    }
                 }
             }
         }

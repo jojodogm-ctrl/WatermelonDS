@@ -32,6 +32,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import io.noties.markwon.Markwon
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import me.magnum.melonds.ui.romdetails.ui.NetplayRequest
 import me.magnum.melonds.R
 import me.magnum.melonds.databinding.ActivityRomListBinding
 import me.magnum.melonds.domain.model.ConsoleType
@@ -59,6 +60,8 @@ class RomListActivity : AppCompatActivity() {
     private val viewModel: RomListViewModel by viewModels()
     private val updatesViewModel: UpdatesViewModel by viewModels()
     private lateinit var emulatorLauncherValidatorDelegate: EmulatorLaunchValidatorDelegate
+    /** Netplay settings waiting for the ROM to pass validation. */
+    private var pendingNetplay: NetplayRequest? = null
 
     private var downloadProgressDialog: AlertDialog? = null
     private var romBrowserDpadDownGate: (() -> Boolean)? = null
@@ -101,7 +104,13 @@ class RomListActivity : AppCompatActivity() {
 
         emulatorLauncherValidatorDelegate = EmulatorLaunchValidatorDelegate(this, object : EmulatorLaunchValidatorDelegate.Callback {
             override fun onRomValidated(rom: Rom) {
-                val intent = EmulatorActivity.getRomEmulatorActivityIntent(this@RomListActivity, rom)
+                val netplay = pendingNetplay
+                pendingNetplay = null
+                val intent = if (netplay != null) {
+                    EmulatorActivity.getRomNetplayIntent(this@RomListActivity, rom, netplay)
+                } else {
+                    EmulatorActivity.getRomEmulatorActivityIntent(this@RomListActivity, rom)
+                }
                 startActivity(intent)
                 overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
             }
@@ -113,7 +122,7 @@ class RomListActivity : AppCompatActivity() {
             }
 
             override fun onValidationAborted() {
-                // Do nothing
+                pendingNetplay = null
             }
         })
 
@@ -323,6 +332,11 @@ class RomListActivity : AppCompatActivity() {
             }
         }
         return false
+    }
+
+    internal fun launchNetplay(rom: Rom, netplay: NetplayRequest) {
+        pendingNetplay = netplay
+        emulatorLauncherValidatorDelegate.validateRom(rom)
     }
 
     internal fun bootFirmware(consoleType: ConsoleType) {
