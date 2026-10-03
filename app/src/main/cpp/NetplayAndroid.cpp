@@ -33,7 +33,8 @@ namespace NetplayAndroid
 namespace
 {
 
-constexpr u16 kPort = 8070;
+constexpr u16 kDefaultPort = 8070;
+u16 sessionPort = kDefaultPort; // set per request: "host:<n>:<port>" or "join:<address>:<port>"
 constexpr u32 kMagic = 0x4E50445A; // v4: checks carry per-block memory hashes
 constexpr u32 kLagFrames = 4;
 
@@ -700,11 +701,17 @@ void Dial()
 {
     ENetAddress addr {};
     enet_address_set_host(&addr, joinAddress.c_str());
-    addr.port = kPort;
+    addr.port = sessionPort;
     if (peers[0]) enet_peer_reset(peers[0]);
     peers[0] = nullptr;
     enet_host_connect(host, &addr, 1, 0);
     lastDial = NowMs();
+}
+
+u16 ParsePort(const std::string& text)
+{
+    int port = atoi(text.c_str());
+    return port > 0 && port <= 65535 ? (u16)port : kDefaultPort;
 }
 
 bool StartConnect(const std::string& request, NDS* local)
@@ -721,16 +728,26 @@ bool StartConnect(const std::string& request, NDS* local)
         myPlayer = 0;
         // "host:<n>": the launching app knows how many are coming
         expectedPlayers = request.size() > 5 ? atoi(request.c_str() + 5) : 0;
+        size_t portSep = request.find(':', 5);
+        sessionPort = portSep != std::string::npos ? ParsePort(request.substr(portSep + 1)) : kDefaultPort;
         if (expectedPlayers > kMaxPlayers) expectedPlayers = kMaxPlayers;
-        ENetAddress addr {ENET_HOST_ANY, kPort};
+        ENetAddress addr {ENET_HOST_ANY, sessionPort};
         host = enet_host_create(&addr, kMaxPlayers + 2, 1, 0, 0);
-        if (!host) { NP_LOG("[netplay] could not listen on %u", kPort); return false; }
-        NP_LOG("[netplay] hosting on port %u, expecting %d players", kPort, expectedPlayers);
+        if (!host) { NP_LOG("[netplay] could not listen on %u", sessionPort); return false; }
+        NP_LOG("[netplay] hosting on port %u, expecting %d players", sessionPort, expectedPlayers);
     }
     else
     {
         myPlayer = -1;
         joinAddress = request.substr(5);
+        // "address:port" (a single colon, so a bare IPv6 address is left alone)
+        sessionPort = kDefaultPort;
+        size_t portSep = joinAddress.rfind(':');
+        if (portSep != std::string::npos && joinAddress.find(':') == portSep)
+        {
+            sessionPort = ParsePort(joinAddress.substr(portSep + 1));
+            joinAddress = joinAddress.substr(0, portSep);
+        }
         host = enet_host_create(nullptr, 1, 1, 0, 0);
         if (!host) return false;
         NP_LOG("[netplay] joining %s", joinAddress.c_str());

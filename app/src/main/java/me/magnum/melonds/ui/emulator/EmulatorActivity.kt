@@ -188,6 +188,18 @@ class EmulatorActivity : AppCompatActivity() {
         const val KEY_NETPLAY_ADDRESS = "eu.emufii.netplay.address"
         /** Optional, for the host: how many players, itself included (2 to 4). */
         const val KEY_NETPLAY_PLAYERS = "eu.emufii.netplay.players"
+        /** Optional: the UDP port, 8070 when absent. */
+        const val KEY_NETPLAY_PORT = "eu.emufii.netplay.port"
+
+        /** A game started in netplay from the ROM details screen, without a launcher. */
+        fun getRomNetplayIntent(context: Context, rom: Rom, role: String, address: String, port: Int, players: Int): Intent {
+            return getRomEmulatorActivityIntent(context, rom).apply {
+                putExtra(KEY_NETPLAY_ROLE, role)
+                putExtra(KEY_NETPLAY_ADDRESS, address)
+                putExtra(KEY_NETPLAY_PORT, port)
+                putExtra(KEY_NETPLAY_PLAYERS, players)
+            }
+        }
 
         fun getFirmwareEmulatorActivityIntent(context: Context, consoleType: ConsoleType): Intent {
             return Intent(context, EmulatorActivity::class.java).apply {
@@ -517,16 +529,22 @@ class EmulatorActivity : AppCompatActivity() {
         // Netplay asked for by the launcher (Emufii): who hosts, and where.
         // Only on a fresh launch: a recreated activity keeps its session.
         if (savedInstanceState == null) {
+            val port = intent?.getIntExtra(KEY_NETPLAY_PORT, 0)?.takeIf { it in 1..65535 }
             when (intent?.getStringExtra(KEY_NETPLAY_ROLE)) {
                 // with the number of players when the launcher knows it, so the
                 // host starts as soon as everyone is in
                 "host" -> {
                     val players = intent.getIntExtra(KEY_NETPLAY_PLAYERS, 0)
-                    MelonEmulator.requestNetplay(if (players > 1) "host:$players" else "host")
+                    MelonEmulator.requestNetplay(when {
+                        port != null -> "host:${players.coerceAtLeast(0)}:$port"
+                        players > 1 -> "host:$players"
+                        else -> "host"
+                    })
                 }
                 "guest" -> intent.getStringExtra(KEY_NETPLAY_ADDRESS)
+                    ?.trim()
                     ?.takeIf { it.isNotBlank() }
-                    ?.let { MelonEmulator.requestNetplay("join:$it") }
+                    ?.let { MelonEmulator.requestNetplay(if (port != null) "join:$it:$port" else "join:$it") }
             }
         }
         externalDisplayMode = settingsRepository.getExternalDisplayMode()

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -160,6 +161,28 @@ fun SaveActionsButton(
 }
 
 @Composable
+fun NetplayButton(
+    size: Dp,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val colors = watermelon
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(13.dp))
+            .background(Color.Black.copy(alpha = 0.3f))
+            .let { if (isFocused) it.background(colors.red.copy(alpha = 0.5f)) else it }
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.Wifi, contentDescription = stringResource(R.string.netplay), tint = Color.White, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
 private fun HeroCover(
     rom: Rom,
     boxArtUrl: String?,
@@ -247,6 +270,7 @@ fun RomHeroVertical(
     onNavigateBack: () -> Unit,
     onSendSaveFile: () -> Unit,
     onImportSaveFile: () -> Unit,
+    onNetplay: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxWidth()) {
@@ -320,6 +344,8 @@ fun RomHeroVertical(
                 )
                 Spacer(Modifier.width(9.dp))
                 SaveActionsButton(size = 50.dp, onSendSaveFile = onSendSaveFile, onImportSaveFile = onImportSaveFile)
+                Spacer(Modifier.width(9.dp))
+                NetplayButton(size = 50.dp, onClick = onNetplay)
             }
         }
     }
@@ -335,6 +361,7 @@ fun RomHeroSidePanel(
     onNavigateBack: () -> Unit,
     onSendSaveFile: () -> Unit,
     onImportSaveFile: () -> Unit,
+    onNetplay: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.width(252.dp).fillMaxHeight()) {
@@ -406,6 +433,8 @@ fun RomHeroSidePanel(
                 )
                 Spacer(Modifier.width(9.dp))
                 SaveActionsButton(size = 42.dp, onSendSaveFile = onSendSaveFile, onImportSaveFile = onImportSaveFile)
+                Spacer(Modifier.width(9.dp))
+                NetplayButton(size = 42.dp, onClick = onNetplay)
             }
         }
     }

@@ -17,6 +17,10 @@ import androidx.compose.material.Surface
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -54,6 +58,7 @@ fun RomDetailsScreen(
     onOfflineSyncNow: () -> Unit,
     onSendSaveFile: () -> Unit,
     onImportSaveFile: () -> Unit,
+    onNetplay: (host: Boolean, address: String, port: Int, players: Int) -> Unit,
     onAchievementFocused: (me.magnum.melonds.ui.common.achievements.ui.model.AchievementUiModel?) -> Unit = {},
     onSettingFocused: (String?, String?) -> Unit = { _, _ -> },
 ) {
@@ -151,6 +156,17 @@ fun RomDetailsScreen(
         }
     }
 
+    var showNetplayDialog by rememberSaveable { mutableStateOf(false) }
+    if (showNetplayDialog) {
+        NetplayDialog(
+            onDismiss = { showNetplayDialog = false },
+            onStart = { host, address, port, players ->
+                showNetplayDialog = false
+                onNetplay(host, address, port, players)
+            },
+        )
+    }
+
     Surface(color = colors.bg, modifier = Modifier.fillMaxSize().then(keyHandlingModifier)) {
         if (isLandscape) {
             Row(Modifier.fillMaxSize().systemBarsPadding()) {
@@ -163,6 +179,7 @@ fun RomDetailsScreen(
                     onNavigateBack = onNavigateBack,
                     onSendSaveFile = onSendSaveFile,
                     onImportSaveFile = onImportSaveFile,
+                    onNetplay = { showNetplayDialog = true },
                 )
                 Column(Modifier.fillMaxSize().background(colors.bg)) {
                     RomDetailsTabRow(
@@ -183,6 +200,7 @@ fun RomDetailsScreen(
                     onNavigateBack = onNavigateBack,
                     onSendSaveFile = onSendSaveFile,
                     onImportSaveFile = onImportSaveFile,
+                    onNetplay = { showNetplayDialog = true },
                     modifier = Modifier.systemBarsPadding(),
                 )
                 RomDetailsTabRow(

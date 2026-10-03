@@ -110,7 +110,13 @@ class RomDetailsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val emulatorLauncherValidatorDelegate = EmulatorLaunchValidatorDelegate(this, object : EmulatorLaunchValidatorDelegate.Callback {
             override fun onRomValidated(rom: Rom) {
-                val intent = EmulatorActivity.getRomEmulatorActivityIntent(this@RomDetailsActivity, rom)
+                val netplay = pendingNetplay
+                pendingNetplay = null
+                val intent = if (netplay != null) {
+                    EmulatorActivity.getRomNetplayIntent(this@RomDetailsActivity, rom, netplay.role, netplay.address, netplay.port, netplay.players)
+                } else {
+                    EmulatorActivity.getRomEmulatorActivityIntent(this@RomDetailsActivity, rom)
+                }
                 startActivity(intent)
                 overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
             }
@@ -120,7 +126,7 @@ class RomDetailsActivity : AppCompatActivity() {
             }
 
             override fun onValidationAborted() {
-                // Do nothing
+                pendingNetplay = null
             }
         })
 
@@ -212,6 +218,10 @@ class RomDetailsActivity : AppCompatActivity() {
                         pendingSaveImportRom = rom
                         saveFileImportLauncher.launch(arrayOf("*/*"))
                     },
+                    onNetplay = { host, address, port, players ->
+                        pendingNetplay = NetplayRequest(if (host) "host" else "guest", address, port, players)
+                        emulatorLauncherValidatorDelegate.validateRom(rom)
+                    },
                     onAchievementFocused = { focusedAchievement.value = it },
                     onSettingFocused = { title, value ->
                         focusedSetting.value = if (title != null) title to value else null
@@ -220,6 +230,11 @@ class RomDetailsActivity : AppCompatActivity() {
             }
         }
     }
+
+    /** Netplay settings waiting for the ROM to pass validation. */
+    private data class NetplayRequest(val role: String, val address: String, val port: Int, val players: Int)
+
+    private var pendingNetplay: NetplayRequest? = null
 
     private fun shareSaveFile(rom: Rom) {
         lifecycleScope.launch {
