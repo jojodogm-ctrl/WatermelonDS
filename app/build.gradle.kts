@@ -39,7 +39,7 @@ android {
         targetSdk = AppConfig.targetSdkVersion
         versionCode = AppConfig.versionCode
         versionName = AppConfig.versionName
-        manifestPlaceholders["appName"] = "@string/app_name"
+        manifestPlaceholders["appName"] = "WatermelonDS Emufii Edition"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))

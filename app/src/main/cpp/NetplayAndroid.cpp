@@ -248,10 +248,14 @@ Check MakeCheck(int player, NDS* nds)
     c.Wram = HashWords(nds->SharedWRAM, nds->SharedWRAMSize) ^ (HashWords(nds->ARM7WRAM, nds->ARM7WRAMSize) * 31u);
     c.Regs9 = HashWords((const u8*)nds->ARM9.R, sizeof(nds->ARM9.R)) ^ nds->ARM9.CPSR;
     c.Regs7 = HashWords((const u8*)nds->ARM7.R, sizeof(nds->ARM7.R)) ^ nds->ARM7.CPSR;
+#ifdef JIT_ENABLED
     c.Jit = (nds->IsJITEnabled() ? 1u : 0u) | ((u32)nds->JIT.GetMaxBlockSize() << 1)
         | (nds->JIT.LiteralOptimizationsEnabled() ? 1u << 16 : 0u)
         | (nds->JIT.BranchOptimizationsEnabled() ? 1u << 17 : 0u)
         | (nds->JIT.FastMemoryEnabled() ? 1u << 18 : 0u);
+#else
+    c.Jit = 0;
+#endif
     const u32 ramLen = nds->MainRAMMask + 1;
     for (u32 i = 0; i < 256 && (i + 1) * 0x4000 <= ramLen; i++)
         c.RamBlocks[i] = HashWords(nds->MainRAM + i * 0x4000, 0x4000);
