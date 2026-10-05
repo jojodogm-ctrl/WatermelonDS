@@ -6,7 +6,9 @@ This fork of WatermelonDS exists only to be used with [Emufii](https://github.co
 
 You don't need to set anything up in the emulator. Install it, point it to your ROM folder, and Emufii launches it and connects the players for you.
 
-Download the APK from the [releases page](https://github.com/jojodogm-ctrl/WatermelonDS/releases/latest). It uses the same package name as the official WatermelonDS but a different signature, so the official app has to be uninstalled first. Back up your saves before doing that.
+Download the APK from the [releases page](https://github.com/jojodogm-ctrl/WatermelonDS/releases/latest). It installs next to the official WatermelonDS, it is not an update of it. Keep your official app: nothing is replaced and nothing has to be uninstalled.
+
+Why: this build has its own package name, `me.magnum.melondualds.emufii`, and its own signing key. Android sees it as a separate app, so it gets its own storage and settings, and your official WatermelonDS, with its saves, settings and save states, stays exactly as it is. Using the official package name would have meant uninstalling the official app first, which wipes its internal data. Emufii looks for this package first and falls back to the official one.
 
 If you want WatermelonDS on its own, use the official version by SapphireRhodonite, linked below. Everything else in this README is from the original project.
 
