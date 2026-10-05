@@ -1,3 +1,15 @@
+# WatermelonDS Emufii Edition
+
+This fork of WatermelonDS exists only to be used with [Emufii](https://github.com/jojodogm-ctrl/emufii). It adds the netplay that lets two to four players use DS local wireless over the internet, and Emufii needs it for its remote local wireless sessions. Without this build, DS games in Emufii only have Wi-Fi Connection play.
+
+You don't need to set anything up in the emulator. Install it, point it to your ROM folder, and Emufii launches it and connects the players for you.
+
+Download the APK from the [releases page](https://github.com/jojodogm-ctrl/WatermelonDS/releases/latest). It uses the same package name as the official WatermelonDS but a different signature, so the official app has to be uninstalled first. Back up your saves before doing that.
+
+If you want WatermelonDS on its own, use the official version by SapphireRhodonite, linked below. Everything else in this README is from the original project.
+
+---
+
 # WatermelonDS
 A Nintendo DS and DSi emulator for Android, built on top of [melonDS](https://melonds.kuribo64.net/) and the
 [melonDS Android port](https://github.com/rafaelvcaetano/melonDS-android) by rafaelvcaetano.
