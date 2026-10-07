@@ -23,6 +23,7 @@
 #include "Savestate.h"
 #include "SPI.h"
 #include "GPU.h"
+#include "GPU3D_Soft.h"
 
 #define NP_LOG(...) __android_log_print(ANDROID_LOG_INFO, "wmds-netplay", __VA_ARGS__)
 
@@ -139,29 +140,58 @@ struct Mirror
 };
 Mirror mirrors[kMaxPlayers];
 
-// A mirror's screens are never shown, yet by default it rasterised its 3D and
-// drew both 2D screens every frame on the CPU: a second full DS per player.
-// The geometry engine stays (games read its tests), only the pixels go.
-// Display capture goes with the 2D renderer: a game reading its own capture
-// back would part, and the per-frame check would say so at once.
-// debug.wmds.mirrorrender=1 puts the renderers back, to measure the gain.
-class NullRenderer3D : public Renderer3D
+// A mirror's screens are never shown, yet it rasterised its 3D every frame on
+// the CPU. Its 3D is now skipped until the game captures the display: a capture
+// copies the 3D into VRAM, where the game can read it back. The 2D renderer
+// always runs, because it also latches the capture and the game polls that bit.
+// Removing it parted Mario Kart DS from its mirror at frame 780 (2026-10-07).
+// Once a game has captured, the mirror renders its 3D to the end of the session.
+// debug.wmds.mirrorrender=1 renders every frame, to measure the gain.
+class MirrorRenderer3D : public Renderer3D
 {
 public:
-    NullRenderer3D() : Renderer3D(false) {}
-    void Reset(GPU&) override {}
-    void RenderFrame(GPU&) override {}
-    u32* GetLine(int) override { return Blank; }
+    explicit MirrorRenderer3D(GPU& gpu) : Renderer3D(false), Gpu(gpu), Real(std::make_unique<SoftRenderer>()) {}
+    void Reset(GPU& gpu) override { Real->Reset(gpu); Stale = true; }
+    void Stop(const GPU& gpu) override { Real->Stop(gpu); }
+    void RestartFrame(GPU& gpu) override { Real->RestartFrame(gpu); }
+    void VCount144(GPU& gpu) override { if (Rendered) Real->VCount144(gpu); }
+    void RenderFrame(GPU& gpu) override
+    {
+        Rendered = false;
+        if (Captured || (gpu.GPU2D_A.CaptureCnt & (1u << 31)))
+        {
+            Captured = true;
+            Render();
+        }
+        else Stale = true;
+    }
+    u32* GetLine(int line) override
+    {
+        if (!Rendered && Gpu.GPU2D_A.CaptureLatch)
+        {
+            // The capture was asked for after this frame's 3D: render it now.
+            // Its textures are read a little later than the console did, so log it.
+            NP_LOG("[netplay] mirror: late 3D render for a capture");
+            Captured = true;
+            Render();
+        }
+        return Rendered ? Real->GetLine(line) : Blank;
+    }
 private:
+    void Render()
+    {
+        // After skipped frames the renderer's buffer is stale: "identical" would reuse it.
+        bool identical = Gpu.GPU3D.RenderFrameIdentical;
+        if (Stale) Gpu.GPU3D.RenderFrameIdentical = false;
+        Real->RenderFrame(Gpu);
+        Gpu.GPU3D.RenderFrameIdentical = identical;
+        Stale = false;
+        Rendered = true;
+    }
+    GPU& Gpu;
+    std::unique_ptr<SoftRenderer> Real;
+    bool Captured = false, Rendered = false, Stale = true;
     u32 Blank[256 * 2] {};
-};
-
-class NullRenderer2D : public GPU2D::Renderer2D
-{
-public:
-    void DrawScanline(u32, GPU2D::Unit*) override {}
-    void DrawSprites(u32, GPU2D::Unit*) override {}
-    void VBlankEnd(GPU2D::Unit*, GPU2D::Unit*) override {}
 };
 
 std::atomic<bool> active {false};
@@ -558,9 +588,8 @@ NDS* BuildMirror(const std::vector<u8>& pkt, NDS* local, const ArgsFactory& mirr
     NDS* nds = new NDS(std::move(*args), &m);
     if (Property("debug.wmds.mirrorrender") != "1")
     {
-        nds->GPU.SetRenderer3D(std::make_unique<NullRenderer3D>());
-        nds->GPU.SetRenderer2D(std::make_unique<NullRenderer2D>());
-        NP_LOG("[netplay] mirror renders nothing");
+        nds->GPU.SetRenderer3D(std::make_unique<MirrorRenderer3D>(nds->GPU));
+        NP_LOG("[netplay] mirror renders its 3D only when the game captures");
     }
     nds->Reset();
 
