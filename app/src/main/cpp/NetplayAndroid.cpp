@@ -124,6 +124,31 @@ struct Mirror
 };
 Mirror mirrors[kMaxPlayers];
 
+// A mirror's screens are never shown, yet by default it rasterised its 3D and
+// drew both 2D screens every frame on the CPU: a second full DS per player.
+// The geometry engine stays (games read its tests), only the pixels go.
+// Display capture goes with the 2D renderer: a game reading its own capture
+// back would part, and the per-frame check would say so at once.
+// debug.wmds.mirrorrender=1 puts the renderers back, to measure the gain.
+class NullRenderer3D : public Renderer3D
+{
+public:
+    NullRenderer3D() : Renderer3D(false) {}
+    void Reset(GPU&) override {}
+    void RenderFrame(GPU&) override {}
+    u32* GetLine(int) override { return Blank; }
+private:
+    u32 Blank[256 * 2] {};
+};
+
+class NullRenderer2D : public GPU2D::Renderer2D
+{
+public:
+    void DrawScanline(u32, GPU2D::Unit*) override {}
+    void DrawSprites(u32, GPU2D::Unit*) override {}
+    void VBlankEnd(GPU2D::Unit*, GPU2D::Unit*) override {}
+};
+
 std::atomic<bool> active {false};
 std::atomic<bool> running {false};
 std::string lastRequest;
@@ -516,6 +541,12 @@ NDS* BuildMirror(const std::vector<u8>& pkt, NDS* local, const ArgsFactory& mirr
 
     // the mirror's userdata is its slot: Platform callbacks find it back by address
     NDS* nds = new NDS(std::move(*args), &m);
+    if (Property("debug.wmds.mirrorrender") != "1")
+    {
+        nds->GPU.SetRenderer3D(std::make_unique<NullRenderer3D>());
+        nds->GPU.SetRenderer2D(std::make_unique<NullRenderer2D>());
+        NP_LOG("[netplay] mirror renders nothing");
+    }
     nds->Reset();
 
     auto* localCart = local->NDSCartSlot.GetCart();
@@ -543,6 +574,8 @@ NDS* BuildMirror(const std::vector<u8>& pkt, NDS* local, const ArgsFactory& mirr
 
 void MirrorLoop(Mirror* m)
 {
+    u64 mirrorUs = 0;
+    u32 mirrorFrames = 0;
     NP_LOG("[netplay] mirror of p%d running from frame %u", m->Player, m->Console->NumFrames);
     m->Console->JIT.ResetBlockCache();
     while (running.load())
@@ -561,7 +594,16 @@ void MirrorLoop(Mirror* m)
             NP_LOG("[netplay] mirror of p%d: input for frame %u while at frame %u", m->Player, f.Frame, nds->NumFrames);
 
         ApplyInput(nds, f);
+        auto t0 = std::chrono::steady_clock::now();
         nds->RunFrame();
+        // What a mirror costs per frame: under 16.7 ms it keeps up with a 60 fps game.
+        mirrorUs += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
+        if (++mirrorFrames == 300)
+        {
+            NP_LOG("[netplay] mirror of p%d: %.2f ms per frame", m->Player, mirrorUs / 300000.0);
+            mirrorUs = 0;
+            mirrorFrames = 0;
+        }
         MPInterface::Get().SetNow(m->Player, nds->GetSysTimestamp());
         LogCheck(m->Player, nds, m->StartFrame);
         Fingerprint(m->Player, nds);
