@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <algorithm>
 #include <vector>
 #include <typeinfo>
 
@@ -35,8 +36,13 @@ namespace
 
 constexpr u16 kDefaultPort = 8070;
 u16 sessionPort = kDefaultPort; // set per request: "host:<n>:<port>" or "join:<address>:<port>"
-constexpr u32 kMagic = 0x4E50445A; // v4: checks carry per-block memory hashes
-constexpr u32 kLagFrames = 4;
+constexpr u32 kMagic = 0x4E50445B; // v5: the host picks the input lag, carried in Start
+// Input lag in frames. Fixed at 4 (67 ms) until v5: past that one way, every
+// console waited for the late input and the game ran at half speed or less.
+// The host measures every guest and picks it; all devices apply the same.
+constexpr u32 kMinLagFrames = 4;
+constexpr u32 kMaxLagFrames = 15;
+u32 lagFrames = kMinLagFrames;
 
 enum MsgType : u8
 {
@@ -46,7 +52,9 @@ enum MsgType : u8
     Msg_Start = 4,    // host -> all: the session starts with this many players
     Msg_Package = 5,  // anyone -> host -> others: a console to mirror
     Msg_Input = 6,    // anyone -> host -> others: one frame of one player's input
-    Msg_Check = 7,    // anyone -> host -> others: fingerprint of one console at one frame
+    Msg_Check = 7,
+    Msg_Ping = 8,     // host -> guest, while waiting: echo this back
+    Msg_Pong = 9,     // guest -> host: the ping, unchanged    // anyone -> host -> others: fingerprint of one console at one frame
 };
 
 #pragma pack(push, 1)
@@ -68,6 +76,13 @@ struct Start
 {
     u8 Type;
     u8 Players;
+    u8 Lag;
+};
+
+struct Ping
+{
+    u8 Type;
+    u32 SentMs;
 };
 
 struct InputFrame
@@ -739,6 +754,39 @@ u64 connectStart = 0, lastDial = 0, lastArrival = 0;
 int expectedPlayers = 0;     // 0: unknown, start once nobody new came for a while
 bool assigned = false;       // guest: the host gave us a number
 u32 ownRomHash = 0;
+std::vector<u32> rttSamples[kMaxPlayers];
+u64 lastPing = 0, readySince = 0;
+constexpr u64 kPingMs = 250;
+constexpr size_t kMinSamples = 6;
+constexpr u64 kMeasureMaxMs = 5000;
+
+// The worst path an input takes: guest to host, or guest to host to guest.
+u32 PickLag()
+{
+    u32 oneWay[kMaxPlayers] = {};
+    bool measured = true;
+    for (int p = 1; p < kMaxPlayers; p++)
+    {
+        if (!peers[p]) continue;
+        auto v = rttSamples[p];
+        if (v.empty()) { measured = false; continue; }
+        std::sort(v.begin(), v.end());
+        // the 80th percentile: the median hides the spikes that stall a frame
+        oneWay[p] = v[std::min(v.size() - 1, v.size() * 4 / 5)] / 2;
+    }
+    if (!measured) return kMaxLagFrames;
+    u32 worst = 0;
+    for (int a = 1; a < kMaxPlayers; a++)
+    {
+        if (!peers[a]) continue;
+        worst = std::max(worst, oneWay[a]);
+        for (int b = a + 1; b < kMaxPlayers; b++)
+            if (peers[b]) worst = std::max(worst, oneWay[a] + oneWay[b]);
+    }
+    // two frames over the measure, for jitter and for the frame being run
+    u32 lag = (worst * 60 + 999) / 1000 + 2;
+    return std::clamp(lag, kMinLagFrames, kMaxLagFrames);
+}
 constexpr u64 kConnectTimeoutMs = 180000;
 constexpr u64 kRedialMs = 3000;
 constexpr u64 kSettleMs = 8000;
@@ -802,6 +850,9 @@ bool StartConnect(const std::string& request, NDS* local)
     connecting = true;
     connectStart = NowMs();
     lastArrival = 0;
+    readySince = 0;
+    lastPing = 0;
+    lagFrames = kMinLagFrames;
     return true;
 }
 
@@ -825,6 +876,15 @@ bool PumpHost()
             continue;
         }
         if (evt.type != ENET_EVENT_TYPE_RECEIVE) continue;
+        if (evt.packet->dataLength == sizeof(Ping) && evt.packet->data[0] == Msg_Pong)
+        {
+            Ping pong {};
+            memcpy(&pong, evt.packet->data, sizeof(pong));
+            for (int p = 1; p < kMaxPlayers; p++)
+                if (peers[p] == evt.peer) rttSamples[p].push_back((u32)NowMs() - pong.SentMs);
+            enet_packet_destroy(evt.packet);
+            continue;
+        }
         bool hello = evt.packet->dataLength == sizeof(Hello) && evt.packet->data[0] == Msg_Hello;
         Hello h {};
         if (hello) memcpy(&h, evt.packet->data, sizeof(h));
@@ -833,7 +893,7 @@ bool PumpHost()
 
         int slot = -1;
         for (int p = 1; p < kMaxPlayers && slot < 0; p++) if (!peers[p]) slot = p;
-        if (h.Magic != kMagic || h.RomHash != ownRomHash || h.Lag != kLagFrames || slot < 0)
+        if (h.Magic != kMagic || h.RomHash != ownRomHash || slot < 0)
         {
             NP_LOG("[netplay] turned a player away (%s)", slot < 0 ? "full" : "not the same game");
             u8 no = Msg_Reject;
@@ -843,6 +903,7 @@ bool PumpHost()
             continue;
         }
         peers[slot] = evt.peer;
+        rttSamples[slot].clear();
         enet_peer_timeout(evt.peer, 0, 10000, 30000);
         Assign a {Msg_Assign, (u8)slot};
         SendTo(evt.peer, &a, sizeof(a));
@@ -851,11 +912,26 @@ bool PumpHost()
         NP_LOG("[netplay] p%d joined", slot);
     }
 
-    int players = 1 + GuestCount();
-    if (players >= 2)
+    if (NowMs() - lastPing >= kPingMs)
     {
-        if (expectedPlayers > 0 ? players >= expectedPlayers : NowMs() - lastArrival > kSettleMs)
-            return true;
+        Ping ping {Msg_Ping, (u32)NowMs()};
+        SendAll(&ping, sizeof(ping));
+        enet_host_flush(host);
+        lastPing = NowMs();
+    }
+
+    int players = 1 + GuestCount();
+    bool ready = players >= 2 &&
+        (expectedPlayers > 0 ? players >= expectedPlayers : NowMs() - lastArrival > kSettleMs);
+    if (!ready) readySince = 0;
+    else
+    {
+        if (!readySince) readySince = NowMs();
+        bool measured = true;
+        for (int p = 1; p < kMaxPlayers; p++)
+            if (peers[p] && rttSamples[p].size() < kMinSamples) measured = false;
+        // A guest that never answers pings still gets in, on the longest lag.
+        if (measured || NowMs() - readySince > kMeasureMaxMs) return true;
     }
     if (NowMs() - connectStart > kConnectTimeoutMs && players < 2)
     {
@@ -876,7 +952,7 @@ bool PumpGuest()
         {
             peers[0] = evt.peer;
             enet_peer_timeout(evt.peer, 0, 10000, 30000);
-            Hello h {Msg_Hello, kMagic, ownRomHash, kLagFrames};
+            Hello h {Msg_Hello, kMagic, ownRomHash, lagFrames};
             SendTo(peers[0], &h, sizeof(h));
             enet_host_flush(host);
             continue;
@@ -891,7 +967,15 @@ bool PumpGuest()
         const u8* d = evt.packet->data;
         size_t len = evt.packet->dataLength;
         bool start = false;
-        if (len == sizeof(Assign) && d[0] == Msg_Assign)
+        if (len == sizeof(Ping) && d[0] == Msg_Ping)
+        {
+            u8 pong[sizeof(Ping)];
+            memcpy(pong, d, sizeof(pong));
+            pong[0] = Msg_Pong;
+            SendTo(peers[0], pong, sizeof(pong));
+            enet_host_flush(host);
+        }
+        else if (len == sizeof(Assign) && d[0] == Msg_Assign)
         {
             myPlayer = d[1];
             assigned = true;
@@ -905,6 +989,7 @@ bool PumpGuest()
         else if (len == sizeof(Start) && d[0] == Msg_Start && assigned)
         {
             numPlayers = d[1];
+            lagFrames = std::clamp<u32>(d[2], kMinLagFrames, kMaxLagFrames);
             start = true;
         }
         enet_packet_destroy(evt.packet);
@@ -949,9 +1034,10 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
             }
             next++;
         }
-        Start s {Msg_Start, (u8)numPlayers};
+        lagFrames = PickLag();
+        Start s {Msg_Start, (u8)numPlayers, (u8)lagFrames};
         SendAll(&s, sizeof(s));
-        NP_LOG("[netplay] starting with %d players", numPlayers);
+        NP_LOG("[netplay] starting with %d players, input lag %u frames", numPlayers, lagFrames);
     }
 
     Savestate ownState(Savestate::DEFAULT_SIZE);
@@ -1044,7 +1130,7 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
         checkOut.clear();
     }
     ownQueue.clear();
-    for (u32 i = 0; i < kLagFrames; i++)
+    for (u32 i = 0; i < lagFrames; i++)
         ownQueue.push_back({Msg_Input, (u8)myPlayer, local->NumFrames + i, 0xFFF, 0, 0, 0});
     for (int p = 0; p < numPlayers; p++)
     {
@@ -1052,7 +1138,7 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
         Mirror& m = mirrors[p];
         std::lock_guard<std::mutex> lk(m.Lock);
         m.Queue.clear();
-        for (u32 i = 0; i < kLagFrames; i++)
+        for (u32 i = 0; i < lagFrames; i++)
             m.Queue.push_back({Msg_Input, (u8)p, m.Console->NumFrames + i, 0xFFF, 0, 0, 0});
     }
 
@@ -1067,8 +1153,8 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
     for (int p = 0; p < numPlayers; p++)
         if (p != myPlayer)
             mirrors[p].Thread = std::thread(MirrorLoop, &mirrors[p]);
-    NP_LOG("[netplay] session running: %d players, we are p%d, local frame %u, jit %d, delay %u ms",
-           numPlayers, myPlayer, local->NumFrames, local->IsJITEnabled() ? 1 : 0, simDelayMs);
+    NP_LOG("[netplay] session running: %d players, we are p%d, local frame %u, jit %d, lag %u frames, delay %u ms",
+           numPlayers, myPlayer, local->NumFrames, local->IsJITEnabled() ? 1 : 0, lagFrames, simDelayMs);
     return true;
 }
 
@@ -1142,7 +1228,7 @@ void BeforeLocalFrame(NDS* local, u32 liveKeys, bool liveTouching, u16 liveX, u1
     if (!active.load()) return;
 
     u32 n = local->NumFrames;
-    InputFrame live {Msg_Input, (u8)myPlayer, n + kLagFrames, liveKeys & 0xFFF, (u8)(liveTouching ? 1 : 0), liveX, liveY};
+    InputFrame live {Msg_Input, (u8)myPlayer, n + lagFrames, liveKeys & 0xFFF, (u8)(liveTouching ? 1 : 0), liveX, liveY};
     ownQueue.push_back(live);
     {
         std::lock_guard<std::mutex> lk(outLock);
