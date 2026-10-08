@@ -48,6 +48,7 @@ enum Event
     Event_TurnedAwayGame = 5,  // host: a player came with another ROM file or Edition
     Event_TurnedAwayFull = 6,  // host: a player came when the session was full
     Event_PlayerLeft = 7,
+    Event_ExchangeFailed = 8,  // connected, but the consoles never all arrived
 };
 
 // The last event, cleared by the call.

@@ -1146,5 +1146,6 @@
     <string name="netplay_event_nobody_came">Nobody joined. You are playing alone.</string>
     <string name="netplay_event_turned_away_game">A player was refused: their ROM file or Emufii Edition version differs from yours. Everyone needs the exact same file.</string>
     <string name="netplay_event_turned_away_full">Netplay: a player was refused, the session is full or already started</string>
+    <string name="netplay_event_exchange_failed">Connected, but the game data never fully arrived. The connection may be too unstable (mobile data, weak Wi-Fi). You are playing alone.</string>
     <string name="netplay_event_player_left">Netplay: a player left, the session is over</string>
 </resources>

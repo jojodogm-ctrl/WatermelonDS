@@ -540,6 +540,7 @@ class EmulatorActivity : AppCompatActivity() {
                     5 -> R.string.netplay_event_turned_away_game to true
                     6 -> R.string.netplay_event_turned_away_full to false
                     7 -> R.string.netplay_event_player_left to false
+                    8 -> R.string.netplay_event_exchange_failed to true
                     else -> continue
                 }
                 if (explain) {

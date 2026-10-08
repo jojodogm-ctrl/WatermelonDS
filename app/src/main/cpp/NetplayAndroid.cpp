@@ -820,6 +820,10 @@ u32 PickLag()
     return std::clamp(lag, kMinLagFrames, kMaxLagFrames);
 }
 constexpr u64 kConnectTimeoutMs = 180000;
+// ENet's 1392 fills the Emufii tunnel's 1420 exactly, so 1480 bytes on the
+// internet once WireGuard wraps it: fragmented or dropped on links below that
+// (some mobile, DS-Lite). Only the console states send full datagrams.
+constexpr enet_uint32 kNetMtu = 1200;
 constexpr u64 kRedialMs = 3000;
 constexpr u64 kSettleMs = 8000;
 
@@ -860,6 +864,7 @@ bool StartConnect(const std::string& request, NDS* local)
         ENetAddress addr {ENET_HOST_ANY, sessionPort};
         host = enet_host_create(&addr, kMaxPlayers + 2, 1, 0, 0);
         if (!host) { NP_LOG("[netplay] could not listen on %u", sessionPort); return false; }
+        host->mtu = kNetMtu;
         NP_LOG("[netplay] hosting on port %u, expecting %d players", sessionPort, expectedPlayers);
     }
     else
@@ -876,6 +881,7 @@ bool StartConnect(const std::string& request, NDS* local)
         }
         host = enet_host_create(nullptr, 1, 1, 0, 0);
         if (!host) return false;
+        host->mtu = kNetMtu;
         NP_LOG("[netplay] joining %s", joinAddress.c_str());
         Dial();
     }
@@ -1091,7 +1097,7 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
         ENetEvent evt;
         if (enet_host_service(host, &evt, 50) <= 0) continue;
         if (evt.type == ENET_EVENT_TYPE_DISCONNECT)
-        { NP_LOG("[netplay] a player left during the exchange"); Teardown(); return false; }
+        { NP_LOG("[netplay] a player left during the exchange"); event = Event_ExchangeFailed; Teardown(); return false; }
         if (evt.type != ENET_EVENT_TYPE_RECEIVE) continue;
         const u8* d = evt.packet->data;
         size_t len = evt.packet->dataLength;
@@ -1106,7 +1112,7 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
         enet_packet_destroy(evt.packet);
     }
     if (have < numPlayers - 1)
-    { NP_LOG("[netplay] never got every console (%d of %d)", have, numPlayers - 1); Teardown(); return false; }
+    { NP_LOG("[netplay] never got every console (%d of %d)", have, numPlayers - 1); event = Event_ExchangeFailed; Teardown(); return false; }
 
     for (int p = 0; p < numPlayers; p++)
     {
