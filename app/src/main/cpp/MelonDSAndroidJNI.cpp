@@ -1075,6 +1075,12 @@ Java_me_magnum_melonds_MelonEmulator_takeNetplayEvent(JNIEnv* env, jobject thiz)
     return NetplayAndroid::TakeEvent();
 }
 
+JNIEXPORT jstring JNICALL
+Java_me_magnum_melonds_MelonEmulator_netplayEventDetail(JNIEnv* env, jobject thiz)
+{
+    return env->NewStringUTF(NetplayAndroid::EventDetail().c_str());
+}
+
 JNIEXPORT void JNICALL
 Java_me_magnum_melonds_MelonEmulator_requestNetplay(JNIEnv* env, jobject thiz, jstring request)
 {

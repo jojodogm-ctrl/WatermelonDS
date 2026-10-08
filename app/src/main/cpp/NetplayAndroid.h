@@ -49,10 +49,14 @@ enum Event
     Event_TurnedAwayFull = 6,  // host: a player came when the session was full
     Event_PlayerLeft = 7,
     Event_ExchangeFailed = 8,  // connected, but the consoles never all arrived
+    Event_Desync = 9,          // a mirror parted from the console it copies
 };
 
 // The last event, cleared by the call.
 int TakeEvent();
+
+// The words noted with the last event, kept until the next one.
+std::string EventDetail();
 
 // A session asked for by the launching app: "host" or "join:<address>". Taken
 // up by the next Poll, whatever the system property says.

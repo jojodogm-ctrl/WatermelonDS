@@ -531,8 +531,10 @@ class EmulatorActivity : AppCompatActivity() {
         lifecycleScope.launch {
             while (true) {
                 delay(1000)
+                val code = MelonEmulator.takeNetplayEvent()
+                if (code != 0) tellLauncher(code)
                 // A toast holds two lines: the failures that need explaining get a dialog.
-                val (message, explain) = when (MelonEmulator.takeNetplayEvent()) {
+                val (message, explain) = when (code) {
                     1 -> R.string.netplay_event_started to false
                     2 -> R.string.netplay_event_rejected to true
                     3 -> R.string.netplay_event_never_got_in to true
@@ -541,6 +543,7 @@ class EmulatorActivity : AppCompatActivity() {
                     6 -> R.string.netplay_event_turned_away_full to false
                     7 -> R.string.netplay_event_player_left to false
                     8 -> R.string.netplay_event_exchange_failed to true
+                    9 -> continue
                     else -> continue
                 }
                 if (explain) {
@@ -552,6 +555,20 @@ class EmulatorActivity : AppCompatActivity() {
                 } else {
                     Toast.makeText(this@EmulatorActivity, message, Toast.LENGTH_LONG).show()
                 }
+            }
+        }
+    }
+
+    // Emufii forwards these as telemetry: a session that went quiet otherwise says nothing.
+    private fun tellLauncher(code: Int) {
+        val detail = runCatching { MelonEmulator.netplayEventDetail() }.getOrNull()
+        val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull()
+        for (pkg in listOf("eu.emufii.app", "eu.emufii.app.debug")) {
+            runCatching {
+                sendBroadcast(Intent("eu.emufii.netplay.EVENT").setPackage(pkg)
+                    .putExtra("event", code)
+                    .putExtra("detail", detail)
+                    .putExtra("emu", "Edition $version"))
             }
         }
     }

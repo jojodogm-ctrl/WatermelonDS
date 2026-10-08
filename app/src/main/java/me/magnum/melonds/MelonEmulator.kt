@@ -114,6 +114,9 @@ object MelonEmulator {
     /** The last netplay event (NetplayEvent), cleared by the call. */
     external fun takeNetplayEvent(): Int
 
+    /** The words noted with the last netplay event (players, lag, frame). */
+    external fun netplayEventDetail(): String
+
     external fun setupAchievements(
         achievements: Array<RASimpleAchievement>,
         leaderboards: Array<RASimpleLeaderboard>,
