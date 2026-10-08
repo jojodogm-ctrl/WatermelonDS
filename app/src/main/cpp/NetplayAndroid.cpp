@@ -206,6 +206,14 @@ int numPlayers = 0;
 ENetHost* host = nullptr;
 // host: one peer per guest, by player number; guest: peers[0] is the host
 ENetPeer* peers[kMaxPlayers] = {};
+// The guest's connection attempt in flight, reset before the next dial.
+ENetPeer* dialing = nullptr;
+
+bool IsMember(ENetPeer* peer)
+{
+    for (auto* p : peers) if (p && p == peer) return true;
+    return false;
+}
 
 std::thread netThread;
 
@@ -710,6 +718,20 @@ void NetLoop()
         ENetEvent evt;
         while (enet_host_service(host, &evt, 1) > 0)
         {
+            // A late or refused player is not in the session: answering or losing it changes nothing.
+            if (evt.type != ENET_EVENT_TYPE_NONE && !IsMember(evt.peer))
+            {
+                if (evt.type == ENET_EVENT_TYPE_RECEIVE)
+                {
+                    enet_packet_destroy(evt.packet);
+                    u8 no = Msg_Reject;
+                    SendTo(evt.peer, &no, 1);
+                    enet_peer_disconnect_later(evt.peer, 0);
+                    NP_LOG("[netplay] turned away a player who came after the start");
+                    event = Event_TurnedAwayFull;
+                }
+                continue;
+            }
             if (evt.type == ENET_EVENT_TYPE_DISCONNECT)
             {
                 // a console nobody drives any more would hold everybody's DetMP
@@ -775,6 +797,7 @@ void Teardown()
     }
     if (host) enet_host_destroy(host);
     host = nullptr;
+    dialing = nullptr;
 }
 
 // Waiting for the other players never blocks the game: the connection is
@@ -826,15 +849,18 @@ constexpr u64 kConnectTimeoutMs = 180000;
 constexpr enet_uint32 kNetMtu = 1200;
 constexpr u64 kRedialMs = 3000;
 constexpr u64 kSettleMs = 8000;
+constexpr u64 kExpectedWaitMs = 60000;
 
 void Dial()
 {
     ENetAddress addr {};
     enet_address_set_host(&addr, joinAddress.c_str());
     addr.port = sessionPort;
+    // One peer slot: an attempt still pending made every redial fail until ENet gave up on it.
     if (peers[0]) enet_peer_reset(peers[0]);
+    else if (dialing) enet_peer_reset(dialing);
     peers[0] = nullptr;
-    enet_host_connect(host, &addr, 1, 0);
+    dialing = enet_host_connect(host, &addr, 1, 0);
     lastDial = NowMs();
 }
 
@@ -960,8 +986,12 @@ bool PumpHost()
     }
 
     int players = 1 + GuestCount();
+    // A member who never launches, or was turned away, held everybody else forever.
+    bool settled = NowMs() - lastArrival > kSettleMs;
     bool ready = players >= 2 &&
-        (expectedPlayers > 0 ? players >= expectedPlayers : NowMs() - lastArrival > kSettleMs);
+        (expectedPlayers > 0
+            ? players >= expectedPlayers || (settled && NowMs() - connectStart > kExpectedWaitMs)
+            : settled);
     if (!ready) readySince = 0;
     else
     {
@@ -1082,6 +1112,20 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
         NP_LOG("[netplay] starting with %d players, input lag %u frames", numPlayers, lagFrames);
     }
 
+    // Two consoles with one MAC never see each other, and they often share one: the
+    // "randomize" setting draws from an unseeded rand(), and downloaded firmware
+    // dumps carry the same address. The player number in the low bits makes every
+    // console in the session distinct; set here, before the package, the mirrors
+    // built from it carry it too.
+    {
+        auto& header = local->SPI.GetFirmware().GetHeader();
+        header.MacAddr[5] = (u8)((header.MacAddr[5] & 0xFC) | (myPlayer & 0x03));
+        header.UpdateChecksum();
+        NP_LOG("[netplay] p%d MAC %02X:%02X:%02X:%02X:%02X:%02X", myPlayer,
+               header.MacAddr[0], header.MacAddr[1], header.MacAddr[2],
+               header.MacAddr[3], header.MacAddr[4], header.MacAddr[5]);
+    }
+
     Savestate ownState(Savestate::DEFAULT_SIZE);
     if (ownState.Error || !local->DoSavestate(&ownState))
     { NP_LOG("[netplay] could not save our console"); Teardown(); return false; }
@@ -1096,6 +1140,9 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
     {
         ENetEvent evt;
         if (enet_host_service(host, &evt, 50) <= 0) continue;
+        if (evt.type == ENET_EVENT_TYPE_RECEIVE && !IsMember(evt.peer))
+        { enet_packet_destroy(evt.packet); continue; }
+        if (evt.type == ENET_EVENT_TYPE_DISCONNECT && !IsMember(evt.peer)) continue;
         if (evt.type == ENET_EVENT_TYPE_DISCONNECT)
         { NP_LOG("[netplay] a player left during the exchange"); event = Event_ExchangeFailed; Teardown(); return false; }
         if (evt.type != ENET_EVENT_TYPE_RECEIVE) continue;
