@@ -41,7 +41,7 @@ namespace
 
 constexpr u16 kDefaultPort = 8070;
 u16 sessionPort = kDefaultPort; // set per request: "host:<n>:<port>" or "join:<address>:<port>"
-constexpr u32 kMagic = 0x4E50445B; // v5: the host picks the input lag, carried in Start
+constexpr u32 kMagic = 0x4E50445C; // v6: inputs also go unreliable, each packet with the last ones
 // Input lag in frames. Fixed at 4 (67 ms) until v5: past that one way, every
 // console waited for the late input and the game ran at half speed or less.
 // The host measures every guest and picks it; all devices apply the same.
@@ -60,6 +60,7 @@ enum MsgType : u8
     Msg_Check = 7,
     Msg_Ping = 8,     // host -> guest, while waiting: echo this back
     Msg_Pong = 9,     // guest -> host: the ping, unchanged    // anyone -> host -> others: fingerprint of one console at one frame
+    Msg_Inputs = 10,  // anyone -> host -> others, unreliable: one player's last frames of input
 };
 
 #pragma pack(push, 1)
@@ -101,6 +102,29 @@ struct InputFrame
     u16 Y;
 };
 
+// A reliable input lost on the way held every later one until ENet resent it,
+// a round trip or more, and every console stalled with it. The same inputs also
+// go unreliable, each packet carrying the last kBundle frames: a loss is covered
+// by the next packet. The reliable copy stays, so nothing is ever missing.
+constexpr int kBundle = 8;
+
+struct InputEntry
+{
+    u32 Frame;
+    u32 Keys;
+    u8 Touching;
+    u16 X;
+    u16 Y;
+};
+
+struct InputBundle
+{
+    u8 Type;
+    u8 Player;
+    u8 Count;
+    InputEntry Entries[kBundle];
+};
+
 // Every device fingerprints every console it runs, its own and its mirrors,
 // and sends them all: the same console fingerprinted on two devices at the
 // same frame must match, and the first pair that does not says when and in
@@ -140,6 +164,9 @@ struct Mirror
     std::mutex Lock;
     std::condition_variable Cond;
     std::deque<InputFrame> Queue;
+    // The next frame this mirror needs: inputs come twice (reliable and unreliable)
+    // and out of order, only that frame is taken.
+    u32 NextFrame = 0;
     u32 StartFrame = 0;
 };
 Mirror mirrors[kMaxPlayers];
@@ -248,6 +275,7 @@ std::deque<std::pair<u64, InputFrame>> delayed;
 
 std::mutex outLock;
 std::deque<InputFrame> outQueue;
+std::deque<InputEntry> sentHistory; // NetLoop only
 std::deque<Check> checkOut;
 
 bool diagnostics = false;
@@ -468,6 +496,15 @@ void SendTo(ENetPeer* peer, const void* data, size_t len)
     ENetPacket* pkt = enet_packet_create(data, len, ENET_PACKET_FLAG_RELIABLE);
     enet_peer_send(peer, 0, pkt);
 }
+
+void SendFast(ENetPeer* peer, const void* data, size_t len)
+{
+    if (!peer) return;
+    ENetPacket* pkt = enet_packet_create(data, len, ENET_PACKET_FLAG_UNSEQUENCED);
+    enet_peer_send(peer, 1, pkt);
+}
+
+size_t BundleSize(const InputBundle& b) { return 3 + (size_t)b.Count * sizeof(InputEntry); }
 
 // A guest talks to the host only. The host sends to every guest but one: the
 // one a relayed packet came from, which already has it.
@@ -715,7 +752,9 @@ void Deliver(const InputFrame& f)
     Mirror& m = mirrors[f.Player];
     if (!m.Console) return;
     std::lock_guard<std::mutex> lk(m.Lock);
+    if (f.Frame != m.NextFrame) return;
     m.Queue.push_back(f);
+    m.NextFrame++;
     m.Cond.notify_all();
 }
 
@@ -731,12 +770,19 @@ void NetLoop()
             {
                 InputFrame f = outQueue.front();
                 outQueue.pop_front();
+                sentHistory.push_back({f.Frame, f.Keys, f.Touching, f.X, f.Y});
+                while (sentHistory.size() > (size_t)kBundle) sentHistory.pop_front();
+                InputBundle b {Msg_Inputs, f.Player, (u8)sentHistory.size(), {}};
+                for (size_t i = 0; i < sentHistory.size(); i++) b.Entries[i] = sentHistory[i];
                 if (IsHost())
                 {
-                    for (int p = 1; p < kMaxPlayers; p++) SendTo(peers[p], &f, sizeof(f));
+                    for (int p = 1; p < kMaxPlayers; p++) { SendFast(peers[p], &b, BundleSize(b)); SendTo(peers[p], &f, sizeof(f)); }
                 }
                 else
+                {
+                    SendFast(peers[0], &b, BundleSize(b));
                     SendTo(peers[0], &f, sizeof(f));
+                }
                 any = true;
             }
             while (!checkOut.empty())
@@ -794,6 +840,31 @@ void NetLoop()
                     if (relayed) enet_host_flush(host);
                 }
                 OnRemoteCheck(c);
+            }
+            else if (evt.packet->dataLength >= 3 && evt.packet->data[0] == Msg_Inputs)
+            {
+                InputBundle b {};
+                size_t len = std::min(evt.packet->dataLength, sizeof(b));
+                memcpy(&b, evt.packet->data, len);
+                if (b.Count <= kBundle && BundleSize(b) == evt.packet->dataLength && b.Player < kMaxPlayers)
+                {
+                    if (IsHost())
+                    {
+                        bool relayed = false;
+                        for (int p = 1; p < kMaxPlayers; p++)
+                            if (p != b.Player && peers[p]) { SendFast(peers[p], &b, BundleSize(b)); relayed = true; }
+                        if (relayed) enet_host_flush(host);
+                    }
+                    for (int i = 0; i < b.Count; i++)
+                    {
+                        const InputEntry& e = b.Entries[i];
+                        InputFrame f {Msg_Input, b.Player, e.Frame, e.Keys, e.Touching, e.X, e.Y};
+                        if (simDelayMs)
+                            delayed.emplace_back(NowMs() + simDelayMs, f);
+                        else
+                            Deliver(f);
+                    }
+                }
             }
             else if (evt.packet->dataLength == sizeof(InputFrame) && evt.packet->data[0] == Msg_Input)
             {
@@ -900,7 +971,7 @@ void Dial()
     if (peers[0]) enet_peer_reset(peers[0]);
     else if (dialing) enet_peer_reset(dialing);
     peers[0] = nullptr;
-    dialing = enet_host_connect(host, &addr, 1, 0);
+    dialing = enet_host_connect(host, &addr, 2, 0);
     lastDial = NowMs();
 }
 
@@ -928,7 +999,7 @@ bool StartConnect(const std::string& request, NDS* local)
         sessionPort = portSep != std::string::npos ? ParsePort(request.substr(portSep + 1)) : kDefaultPort;
         if (expectedPlayers > kMaxPlayers) expectedPlayers = kMaxPlayers;
         ENetAddress addr {ENET_HOST_ANY, sessionPort};
-        host = enet_host_create(&addr, kMaxPlayers + 2, 1, 0, 0);
+        host = enet_host_create(&addr, kMaxPlayers + 2, 2, 0, 0);
         if (!host) { NP_LOG("[netplay] could not listen on %u", sessionPort); return false; }
         host->mtu = kNetMtu;
         NP_LOG("[netplay] hosting on port %u, expecting %d players", sessionPort, expectedPlayers);
@@ -945,7 +1016,7 @@ bool StartConnect(const std::string& request, NDS* local)
             sessionPort = ParsePort(joinAddress.substr(portSep + 1));
             joinAddress = joinAddress.substr(0, portSep);
         }
-        host = enet_host_create(nullptr, 1, 1, 0, 0);
+        host = enet_host_create(nullptr, 1, 2, 0, 0);
         if (!host) return false;
         host->mtu = kNetMtu;
         NP_LOG("[netplay] joining %s", joinAddress.c_str());
@@ -1259,6 +1330,10 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
         checkOut.clear();
     }
     ownQueue.clear();
+    {
+        std::lock_guard<std::mutex> lk(outLock);
+        sentHistory.clear();
+    }
     for (u32 i = 0; i < lagFrames; i++)
         ownQueue.push_back({Msg_Input, (u8)myPlayer, local->NumFrames + i, 0xFFF, 0, 0, 0});
     for (int p = 0; p < numPlayers; p++)
@@ -1269,6 +1344,7 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
         m.Queue.clear();
         for (u32 i = 0; i < lagFrames; i++)
             m.Queue.push_back({Msg_Input, (u8)p, m.Console->NumFrames + i, 0xFFF, 0, 0, 0});
+        m.NextFrame = m.Console->NumFrames + lagFrames;
     }
 
     diagnostics = Property("debug.wmds.diag") == "1";
