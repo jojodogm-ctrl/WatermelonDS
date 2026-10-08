@@ -524,6 +524,37 @@ class EmulatorActivity : AppCompatActivity() {
         }
     )
 
+    // A refused or failed session used to leave the game running alone with
+    // nothing on screen: players sat in the same lobby menu and never met.
+    private fun watchNetplay() {
+        Toast.makeText(this, R.string.netplay_waiting, Toast.LENGTH_LONG).show()
+        lifecycleScope.launch {
+            while (true) {
+                delay(1000)
+                // A toast holds two lines: the failures that need explaining get a dialog.
+                val (message, explain) = when (MelonEmulator.takeNetplayEvent()) {
+                    1 -> R.string.netplay_event_started to false
+                    2 -> R.string.netplay_event_rejected to true
+                    3 -> R.string.netplay_event_never_got_in to true
+                    4 -> R.string.netplay_event_nobody_came to true
+                    5 -> R.string.netplay_event_turned_away_game to true
+                    6 -> R.string.netplay_event_turned_away_full to false
+                    7 -> R.string.netplay_event_player_left to false
+                    else -> continue
+                }
+                if (explain) {
+                    AlertDialog.Builder(this@EmulatorActivity)
+                        .setTitle(R.string.netplay)
+                        .setMessage(message)
+                        .setPositiveButton(R.string.ok, null)
+                        .show()
+                } else {
+                    Toast.makeText(this@EmulatorActivity, message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handler = Handler(mainLooper)
@@ -548,6 +579,7 @@ class EmulatorActivity : AppCompatActivity() {
                     ?.let { MelonEmulator.requestNetplay(if (port != null) "join:$it:$port" else "join:$it") }
             }
         }
+        if (intent?.getStringExtra(KEY_NETPLAY_ROLE) != null) watchNetplay()
         externalDisplayMode = settingsRepository.getExternalDisplayMode()
         lifecycleOwnerProvider.setCurrentLifecycleOwner(this)
         binding = ActivityEmulatorBinding.inflate(layoutInflater)

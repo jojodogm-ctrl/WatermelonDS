@@ -35,6 +35,24 @@ bool Poll(melonDS::NDS* local, int localId, const ArgsFactory& mirrorArgs);
 
 bool Active();
 
+// What happened to the session, for the player to see: a refusal used to leave
+// the game running alone, with nothing on screen. Values shared with
+// MelonEmulator.takeNetplayEvent.
+enum Event
+{
+    Event_None = 0,
+    Event_Started = 1,
+    Event_Rejected = 2,        // guest: the host has another ROM file, another Edition, or is full
+    Event_NeverGotIn = 3,      // guest: no answer from the host
+    Event_NobodyCame = 4,      // host: nobody joined
+    Event_TurnedAwayGame = 5,  // host: a player came with another ROM file or Edition
+    Event_TurnedAwayFull = 6,  // host: a player came when the session was full
+    Event_PlayerLeft = 7,
+};
+
+// The last event, cleared by the call.
+int TakeEvent();
+
 // A session asked for by the launching app: "host" or "join:<address>". Taken
 // up by the next Poll, whatever the system property says.
 void Request(const std::string& request);

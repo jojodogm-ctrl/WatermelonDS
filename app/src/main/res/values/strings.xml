@@ -1139,4 +1139,12 @@
     <string name="netplay_join_hint">Enter the host\'s IP address and port. Everyone needs the same game and the same WatermelonDS version.</string>
     <string name="netplay_start">Start</string>
     <string name="netplay_cancel">Cancel</string>
+    <string name="netplay_waiting">Netplay: waiting for the other players</string>
+    <string name="netplay_event_started">Netplay: everyone is connected</string>
+    <string name="netplay_event_rejected">The host refused you. Everyone needs the exact same ROM file (same region, same revision, no patch) and the same Emufii Edition version. You are playing alone.</string>
+    <string name="netplay_event_never_got_in">The host never answered. You are playing alone.</string>
+    <string name="netplay_event_nobody_came">Nobody joined. You are playing alone.</string>
+    <string name="netplay_event_turned_away_game">A player was refused: their ROM file or Emufii Edition version differs from yours. Everyone needs the exact same file.</string>
+    <string name="netplay_event_turned_away_full">Netplay: a player was refused, the session is full or already started</string>
+    <string name="netplay_event_player_left">Netplay: a player left, the session is over</string>
 </resources>

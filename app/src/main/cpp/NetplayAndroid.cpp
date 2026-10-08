@@ -196,6 +196,8 @@ private:
 
 std::atomic<bool> active {false};
 std::atomic<bool> running {false};
+// The last thing the player should hear about, taken by the activity.
+std::atomic<int> event {Event_None};
 std::string lastRequest;
 
 int myPlayer = 0;
@@ -712,6 +714,7 @@ void NetLoop()
             {
                 // a console nobody drives any more would hold everybody's DetMP
                 NP_LOG("[netplay] a player left, session over");
+                event = Event_PlayerLeft;
                 running = false;
                 for (auto& m : mirrors) m.Cond.notify_all();
                 break;
@@ -925,6 +928,7 @@ bool PumpHost()
         if (h.Magic != kMagic || h.RomHash != ownRomHash || slot < 0)
         {
             NP_LOG("[netplay] turned a player away (%s)", slot < 0 ? "full" : "not the same game");
+            event = slot < 0 ? Event_TurnedAwayFull : Event_TurnedAwayGame;
             u8 no = Msg_Reject;
             SendTo(evt.peer, &no, 1);
             enet_host_flush(host);
@@ -965,6 +969,7 @@ bool PumpHost()
     if (NowMs() - connectStart > kConnectTimeoutMs && players < 2)
     {
         NP_LOG("[netplay] nobody came");
+        event = Event_NobodyCame;
         connecting = false;
         Teardown();
     }
@@ -1013,6 +1018,7 @@ bool PumpGuest()
         else if (len == 1 && d[0] == Msg_Reject)
         {
             NP_LOG("[netplay] the host turned us away (not the same game, or full)");
+            event = Event_Rejected;
             connecting = false;
         }
         else if (len == sizeof(Start) && d[0] == Msg_Start && assigned)
@@ -1030,6 +1036,7 @@ bool PumpGuest()
     if (now - connectStart > kConnectTimeoutMs)
     {
         NP_LOG("[netplay] never got in");
+        event = Event_NeverGotIn;
         connecting = false;
         Teardown();
         return false;
@@ -1182,6 +1189,7 @@ bool Exchange(NDS* local, const ArgsFactory& mirrorArgs)
     for (int p = 0; p < numPlayers; p++)
         if (p != myPlayer)
             mirrors[p].Thread = std::thread(MirrorLoop, &mirrors[p]);
+    event = Event_Started;
     NP_LOG("[netplay] session running: %d players, we are p%d, local frame %u, jit %d, lag %u frames, delay %u ms",
            numPlayers, myPlayer, local->NumFrames, local->IsJITEnabled() ? 1 : 0, lagFrames, simDelayMs);
     return true;
@@ -1245,6 +1253,11 @@ bool Poll(NDS* local, int localId, const ArgsFactory& mirrorArgs)
 bool Active()
 {
     return active.load();
+}
+
+int TakeEvent()
+{
+    return event.exchange(Event_None);
 }
 
 int LocalMpId(int instanceId)
