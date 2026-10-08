@@ -2934,7 +2934,8 @@ Java_me_magnum_melonds_MelonEmulator_setSlot2AnalogInput(JNIEnv* env, jobject th
 JNIEXPORT void JNICALL
 Java_me_magnum_melonds_MelonEmulator_setFastForwardEnabled(JNIEnv* env, jobject thiz, jboolean enabled)
 {
-    const bool fastForwardEnabled = enabled == JNI_TRUE;
+    // Fast forward only stalls on the mirrors in netplay.
+    const bool fastForwardEnabled = enabled == JNI_TRUE && !NetplayAndroid::Active();
     const bool wasFastForwardEnabled = isFastForwardEnabled.exchange(
         fastForwardEnabled,
         std::memory_order_acq_rel);
@@ -3302,8 +3303,11 @@ void* emulate(void*)
                     delay -= std::min(esperaCola, frameTimeStep);
             }
             frameLimitError += frameTimeStep - delay;
-            if (frameLimitError < -frameTimeStep)
-                frameLimitError = -frameTimeStep;
+            // In netplay a stall waiting for a mirror is caught up over the next frames,
+            // instead of leaving the game a few frames behind for good.
+            const double catchUp = NetplayAndroid::Active() ? 4.0 * frameTimeStep : frameTimeStep;
+            if (frameLimitError < -catchUp)
+                frameLimitError = -catchUp;
             if (frameLimitError > frameTimeStep)
                 frameLimitError = frameTimeStep;
 

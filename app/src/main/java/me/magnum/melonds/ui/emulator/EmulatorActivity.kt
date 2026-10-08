@@ -544,6 +544,7 @@ class EmulatorActivity : AppCompatActivity() {
                     7 -> R.string.netplay_event_player_left to false
                     8 -> R.string.netplay_event_exchange_failed to true
                     9 -> continue
+                    10 -> R.string.netplay_event_slow_device to false
                     else -> continue
                 }
                 if (explain) {

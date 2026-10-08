@@ -50,6 +50,7 @@ enum Event
     Event_PlayerLeft = 7,
     Event_ExchangeFailed = 8,  // connected, but the consoles never all arrived
     Event_Desync = 9,          // a mirror parted from the console it copies
+    Event_SlowDevice = 10,     // a mirror needs most of the frame: this phone slows the game
 };
 
 // The last event, cleared by the call.

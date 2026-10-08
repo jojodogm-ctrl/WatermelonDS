@@ -3170,8 +3170,9 @@ u32 MelonInstance::runFrame(bool frameskipSolicitado)
     vulkanFrameskipSwapEsteFotograma =
         nds != nullptr && (nds->PowerControl9 & (1u << 15u)) != 0u;
 
+    // In netplay too: the mirrors run at the same priority, and none may starve the others.
     const bool useVulkanProductionThreadPriority =
-        currentRenderer == Renderer::Vulkan;
+        currentRenderer == Renderer::Vulkan || NetplayAndroid::Active();
     if (useVulkanProductionThreadPriority)
     {
         if (!vulkanEmulationThreadPriorityRaised)

@@ -1,6 +1,8 @@
 #include "NetplayAndroid.h"
 
 #include <atomic>
+#include <sys/resource.h>
+#include <unistd.h>
 #include <cstdarg>
 #include <mutex>
 #include <chrono>
@@ -646,10 +648,20 @@ NDS* BuildMirror(const std::vector<u8>& pkt, NDS* local, const ArgsFactory& mirr
     return nds;
 }
 
+// The local console waits for its slowest mirror at every wireless exchange: at the
+// default nice 0 the mirrors and the net thread lost the big cores to it and slowed
+// the whole game down. Same priority as the local emulation thread.
+void RaiseThreadPriority()
+{
+    (void)setpriority(PRIO_PROCESS, gettid(), -8);
+}
+
 void MirrorLoop(Mirror* m)
 {
+    RaiseThreadPriority();
     u64 mirrorUs = 0;
     u32 mirrorFrames = 0;
+    bool toldSlow = false;
     NP_LOG("[netplay] mirror of p%d running from frame %u", m->Player, m->Console->NumFrames);
     m->Console->JIT.ResetBlockCache();
     while (running.load())
@@ -675,6 +687,12 @@ void MirrorLoop(Mirror* m)
         if (++mirrorFrames == 300)
         {
             NP_LOG("[netplay] mirror of p%d: %.2f ms per frame", m->Player, mirrorUs / 300000.0);
+            // Over 12 ms a mirror is close to the 16.7 ms frame: the phone is what slows the game.
+            if (!toldSlow && mirrorUs / 300000.0 > 12.0)
+            {
+                toldSlow = true;
+                Note(Event_SlowDevice, "p%d %.1fms", m->Player, mirrorUs / 300000.0);
+            }
             mirrorUs = 0;
             mirrorFrames = 0;
         }
@@ -703,6 +721,7 @@ void Deliver(const InputFrame& f)
 
 void NetLoop()
 {
+    RaiseThreadPriority();
     while (running.load())
     {
         {
@@ -844,7 +863,8 @@ u32 PickLag()
     {
         if (!peers[p]) continue;
         auto v = rttSamples[p];
-        if (v.empty()) { measured = false; continue; }
+        // No ping answered in the lobby: ENet's own round trip, rather than the 15-frame maximum for everyone.
+        if (v.empty()) { if (peers[p]->roundTripTime > 0) oneWay[p] = peers[p]->roundTripTime / 2; else measured = false; continue; }
         std::sort(v.begin(), v.end());
         // the 80th percentile: the median hides the spikes that stall a frame
         oneWay[p] = v[std::min(v.size() - 1, v.size() * 4 / 5)] / 2;
